@@ -1,0 +1,15 @@
+Package: MimESys
+Title: Simulating Multi-omics Datasets with Arbitrary Association Structure
+Version: 0.0.1
+Date: 2022-05-20
+Author: Himel Mallick <himel.mallick@merck.com>
+Maintainer: Himel Mallick <himel.mallick@merck.com>
+Description: MimESys provides a set of validated simulation modules to generate realistic microbiome datasets with arbitrary association structures. 
+Depends: R (>= 3.5.0), data.table, Rfast2, Rfast, ggplot2, optparse, tibble, vegan
+Suggests: knitr, rmarkdown
+VignetteBuilder: knitr
+License: MIT 
+LazyData: true
+Encoding: UTF-8
+RoxygenNote: 6.1.1
+biocViews: Simulation, Software, Multiomics
