@@ -1,4 +1,4 @@
-# MimESys (Simulating Multi-omics Datasets with Arbitrary Association Structure)
+# Mimesys (Simulating Multi-omics Datasets with Arbitrary Association Structure)
 
 ## Introduction
 
