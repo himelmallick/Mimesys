@@ -1,11 +1,11 @@
 # MimeSys
 
-MimeSys is a template-based simulator for multi-omics method benchmarking. It learns layer-specific distributions and cross-layer dependence from an empirical dataset, then generates synthetic multi-view data with controlled sample size, feature count, cross-omics correlation, differential-effect alignment, and outcome-generation structure.
+MimeSys is a template-based simulator for multi-omics data generation and validation. It learns layer-specific distributions and cross-layer dependence from an empirical dataset, then generates synthetic multi-view data with controlled sample size, feature count, cross-omics correlation, differential-effect alignment, and outcome-generation structure.
 
 The current package is designed around two linked goals:
 
 1. Generate realistic null multi-omics data that preserves important empirical features of the source dataset.
-2. Spike outcomes in controlled ways so benchmarking methods can be tested under scenarios where early, intermediate, late, or single-view methods are expected to behave differently.
+2. Spike outcomes in controlled ways so downstream method evaluation can be performed outside the core package.
 
 ## Installation
 
@@ -26,7 +26,7 @@ pak::local_install(".")
 devtools::load_all(".")
 ```
 
-Core packages used by MimeSys include `Matrix`, `MASS`, `mvtnorm`, `ggplot2`, and `dplyr`. Some benchmark scripts use additional modeling packages such as `SuperLearner`, `glmnet`, `xgboost`, or `multiview`, depending on the experiment being run.
+Core packages used by MimeSys include `Matrix`, `MASS`, `mvtnorm`, `ggplot2`, and `dplyr`.
 
 ## Basic Workflow
 
@@ -49,7 +49,7 @@ template <- fit_template(
   view.transform = "none"
 )
 
-# 3. Generate benchmark-ready simulated data from the fitted template
+# 3. Generate simulated data from the fitted template
 sim <- gen_simmba(
   template = template,
   nsample = 200,
@@ -186,9 +186,9 @@ The fitted template stores:
 
 The template is intentionally reusable. Fit it once from the empirical dataset, then generate many synthetic datasets across a grid of sample sizes, feature counts, crosstalk values, and outcome-generation scenarios.
 
-## Generating Benchmark Datasets
+## Generating Simulation Datasets
 
-`gen_simmba()` is the high-level function used for benchmarking. It calls the null simulator, spikes feature effects, generates outcomes, and splits each replicate into training and test data.
+`gen_simmba()` is the high-level simulation function. It calls the null simulator, spikes feature effects, generates outcomes, and splits each replicate into training and test data.
 
 ```r
 sim <- gen_simmba(
@@ -246,7 +246,7 @@ The sections below describe the high-level `gen_simmba()` arguments. Arguments t
 
 Number of samples to simulate in each replicate before train/test splitting.
 
-This can be smaller, equal to, or larger than the empirical sample size. In benchmarking, this is usually varied to test whether method behavior stabilizes as sample size increases.
+This can be smaller, equal to, or larger than the empirical sample size. In simulation studies, this is usually varied to test whether downstream results stabilize as sample size increases.
 
 ### `template`
 
@@ -292,7 +292,7 @@ Conceptually:
 - Low `crosstalk` means the views are more independent.
 - High `crosstalk` means the views share more latent structure and are more correlated across layers.
 
-This is a simulation-control parameter, not an automatically estimated biological truth. It changes how strongly latent factors are shared across layers. Empirically, higher crosstalk should generally increase cross-view correlation, but it does not necessarily imply that fusion methods will perform better. High crosstalk can create redundancy rather than complementarity.
+This is a simulation-control parameter, not an automatically estimated biological truth. It changes how strongly latent factors are shared across layers. Empirically, higher crosstalk should generally increase cross-view correlation, but high crosstalk can create redundancy rather than complementarity.
 
 `crosstalk` can be a scalar shared by all views or a vector with one value per view. Values must be non-negative and cannot exceed `crosstalk_max(template)`.
 
@@ -538,7 +538,7 @@ This creates signal that is less tied to the cross-view structure.
 
 The implementation supports numeric values between `0` and `1`. Fractional values interpolate between random and aligned signal directions.
 
-In many benchmark scripts we use the interpretable endpoints:
+In many simulation grids, the interpretable endpoints are:
 
 - `0`: random effect orientation.
 - `1`: aligned effect orientation.
@@ -561,7 +561,7 @@ signal.share = c(Immunome = 1, Metabolome = 0, Proteome = 0)
 
 This is useful for validating that single-layer methods win when only one layer carries the outcome signal.
 
-Balanced scenarios are useful for testing whether fusion methods can benefit from distributed signal:
+Balanced scenarios are useful for generating outcomes where signal is distributed across layers:
 
 ```r
 signal.share = c(Immunome = 1, Metabolome = 1, Proteome = 1)
@@ -656,13 +656,13 @@ The outcome is stored in sample metadata as `Y`.
 
 The latent score is converted to event probabilities and sampled as a binary outcome.
 
-This is useful for classification benchmarks.
+This is useful for classification-style simulations.
 
 ### Survival
 
 The latent score is converted into survival-like outcome metadata. The generated sample metadata contains survival fields such as time and event status.
 
-This is useful for survival-model benchmarking.
+This is useful for survival-style simulations.
 
 ## Signal-To-Noise Ratio
 
@@ -670,7 +670,7 @@ This is useful for survival-model benchmarking.
 
 Higher `snr` creates easier prediction tasks. Lower `snr` creates harder tasks.
 
-For benchmarking, it is often useful to keep `snr` fixed while varying sample size, feature count, crosstalk, and signal-sharing scenario.
+For simulation studies, it is often useful to keep `snr` fixed while varying sample size, feature count, crosstalk, and signal-sharing scenario.
 
 ## Microbiome Two-Stage Emission Model
 
@@ -728,7 +728,7 @@ The two-stage emission is part of null feature generation. It is separate from o
 
 ## Additive Versus Shared-Latent Outcome Generation
 
-Two outcome-generation modes are especially important for current benchmarking.
+Two outcome-generation modes are especially important for current simulation studies.
 
 ### Additive Outcome Generation
 
@@ -743,7 +743,6 @@ This supports scenarios where each layer contributes its own piece of the outcom
 Expected behavior:
 
 - Single-layer signal: best single layer should perform well.
-- Balanced signal across layers: fusion may outperform the best single layer.
 - High crosstalk may not always help, because shared information can become redundant.
 
 ### Shared-Latent Outcome Generation
@@ -763,8 +762,6 @@ eta = rowSums(scale(shared_factors)) / sqrt(number_of_factors)
 Expected behavior:
 
 - The outcome is intrinsically multi-view because it is generated from the structure shared across layers.
-- Intermediate or late fusion can become more competitive when the shared latent process is recoverable.
-- Estimated cooperative `rho` does not have to increase monotonically with crosstalk. Crosstalk controls cross-view correlation in the simulated features, while `rho` is selected by predictive cross-validation.
 
 ## Inspecting Simulated Data
 
@@ -827,17 +824,45 @@ The summary reports:
 - Signal sharing.
 - Differential-effect alignment.
 
-## Correlation Diagnostics
+## Core Validation
 
-MimeSys includes tools for validating whether the simulated data preserve or manipulate correlation structure as expected.
+MimeSys keeps validation focused on two checks: blockwise feature-correlation plots and reconstruction error for observed versus simulated correlation blocks.
+
+For blockwise feature-correlation plots:
 
 ```r
-validate_template_simulation(sim)
+observed_corr <- blockwise_feature_correlation(
+  views,
+  max_features_per_view = 100
+)
+
+sim_views <- simulation_view_matrices(
+  sim,
+  rep = 1,
+  split = "train",
+  feature_names = "template_feature"
+)
+
+sim_corr <- blockwise_feature_correlation(
+  sim_views,
+  max_features_per_view = 100
+)
+
+plot_blockwise_feature_correlation(observed_corr)
+plot_blockwise_feature_correlation(sim_corr)
 ```
 
-This computes diagnostics comparing correlation behavior across simulated views.
+For reconstruction error:
 
-For crosstalk-specific diagnostics, use:
+```r
+feature_correlation_frobenius(
+  observed_matrices = views,
+  simulated_matrices = sim_views,
+  max_features_per_view = 100
+)
+```
+
+For crosstalk-specific reconstruction-error sweeps, use:
 
 ```r
 cal <- calibrate_crosstalk(
@@ -856,11 +881,10 @@ In validation experiments, useful expected patterns are:
 - Reconstruction error should decrease as sample size increases.
 - Reconstruction error should remain stable as the number of features increases while sample size is fixed.
 - Cross-view correlation should generally increase with crosstalk.
-- Predictive fusion advantage may be strongest when signal is shared across layers and not purely redundant.
 
-## Benchmarking Scenarios
+## Outcome-Generation Scenarios
 
-A small set of benchmark scenarios is usually enough to validate the simulator.
+A small set of outcome-generation scenarios is usually enough to check that the simulator can create distinct signal regimes.
 
 ### Single-Layer Signal
 
@@ -870,8 +894,6 @@ signal.share = c(Immunome = 1, Metabolome = 0, Proteome = 0)
 
 Expected behavior:
 
-- The informative single layer should perform best.
-- Fusion should not be forced to win.
 - This validates that the simulator can create view-specific signal.
 
 ### Balanced Additive Signal
@@ -895,7 +917,7 @@ ygen.mode = "SharedLatent"
 Expected behavior:
 
 - The outcome is driven by cross-view latent structure.
-- Intermediate and late fusion become natural competitors to early fusion.
+- The outcome is intrinsically tied to cross-view latent structure.
 
 ### Nonlinear Signal
 
@@ -977,7 +999,7 @@ When describing a MimeSys simulation, report:
 - Differential-effect alignment.
 - Signal-to-noise ratio.
 - Number of replicates.
-- Learners and fusion methods used for benchmarking.
+- Any downstream analysis settings used outside the package.
 
 Example:
 
@@ -1008,4 +1030,4 @@ R CMD check --no-manual --no-build-vignettes MimeSys_*.tar.gz
 
 ## Notes On Interpretation
 
-Crosstalk is not the same as fusion advantage. Crosstalk controls the cross-view correlation structure in the simulated features. Fusion advantage depends on how outcome-relevant signal is distributed across layers and whether the information is complementary or redundant.
+Crosstalk is not the same as downstream performance gain. Crosstalk controls the cross-view correlation structure in the simulated features. Downstream performance depends on how outcome-relevant signal is distributed across layers and whether the information is complementary or redundant.

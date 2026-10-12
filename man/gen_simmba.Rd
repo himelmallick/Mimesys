@@ -2,7 +2,7 @@
 % Please edit documentation in R/gen_simmba.R
 \name{gen_simmba}
 \alias{gen_simmba}
-\title{Generate simulated multi-omics data for benchmarking}
+\title{Generate simulated multi-omics data}
 \usage{
 gen_simmba(
   nsample,

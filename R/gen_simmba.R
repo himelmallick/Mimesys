@@ -1,4 +1,4 @@
-#' Generate simulated multi-omics data for benchmarking
+#' Generate simulated multi-omics data
 #'
 #' Generates null multiview data from a real template (see \code{fit_template()}
 #' and \code{sim_from_template()}), spikes in signal, generates the outcome, and

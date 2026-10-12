@@ -17,12 +17,12 @@ knitr::opts_chunk$set(
 
 # Overview
 
-MimeSys is a template-based simulator for multi-omics benchmarking. The central idea is to learn a reusable template from an empirical multi-view dataset, then generate synthetic datasets that preserve the empirical marginal distributions and dependence structure while allowing the analyst to control sample size, feature count, crosstalk, spike-in signal, and outcome-generation mode.
+MimeSys is a template-based simulator for multi-omics data generation and validation. The central idea is to learn a reusable template from an empirical multi-view dataset, then generate synthetic datasets that preserve the empirical marginal distributions and dependence structure while allowing the analyst to control sample size, feature count, crosstalk, spike-in signal, and outcome-generation mode.
 
 The workflow has three parts:
 
 1. Fit a template with `fit_template()`.
-2. Generate benchmark-ready datasets with `gen_simmba()`.
+2. Generate simulated datasets with `gen_simmba()`.
 3. Validate the simulated data with correlation and diagnostic functions.
 
 This vignette focuses on the arguments used in the current API and how those arguments affect the simulated data.
@@ -200,9 +200,9 @@ template <- fit_template(
 )
 ```
 
-# Step 2: Generate benchmark-ready simulations
+# Step 2: Generate simulations
 
-Use `gen_simmba()` for outcome-based benchmarking. It performs four operations:
+Use `gen_simmba()` for outcome-based simulation. It performs four operations:
 
 1. Generate null multi-view features from the template.
 2. Spike feature effects.
@@ -249,7 +249,7 @@ sim <- gen_simmba(
 )
 ```
 
-Varying `nsample` is useful for checking whether benchmarking results become more stable with larger sample sizes.
+Varying `nsample` is useful for checking whether downstream results become more stable with larger sample sizes.
 
 ## `template`
 
@@ -308,7 +308,7 @@ Interpretation:
 - `crosstalk = 1` uses the template-level shared structure.
 - Values above 1 can amplify the learned shared structure up to `crosstalk_max(template)`.
 
-Crosstalk is not the same as fusion advantage. High crosstalk creates more cross-view correlation, but the outcome signal can become redundant across views. Fusion advantage depends on the interaction between `crosstalk`, `signal.share`, `de.align`, and `ygen.mode`.
+Crosstalk is not the same as downstream performance gain. High crosstalk creates more cross-view correlation, but the outcome signal can become redundant across views. Downstream behavior depends on the interaction between `crosstalk`, `signal.share`, `de.align`, and `ygen.mode`.
 
 ## `feature.select`
 
@@ -658,7 +658,7 @@ $$
 
 where \(A_{ij}\) is the positive abundance draw. This helps preserve sparsity and zero inflation while still allowing cross-view dependence through the simulator.
 
-# Recommended benchmark scenarios
+# Recommended outcome-generation scenarios
 
 ## Single-layer signal
 
@@ -671,7 +671,7 @@ sim_single <- gen_simmba(
 )
 ```
 
-Expected behavior: the informative layer should perform well, and fusion should not be forced to win.
+Expected behavior: only the selected layer carries the spiked outcome signal.
 
 ## Balanced additive signal
 
@@ -685,7 +685,7 @@ sim_balanced <- gen_simmba(
 )
 ```
 
-Expected behavior: fusion can outperform the best single layer when signal is distributed across layers.
+Expected behavior: the spiked outcome signal is distributed across layers.
 
 ## Shared-latent signal
 
@@ -698,7 +698,7 @@ sim_shared <- gen_simmba(
 )
 ```
 
-Expected behavior: the outcome is driven by shared cross-view structure, making intermediate or late fusion natural competitors.
+Expected behavior: the outcome is driven by shared cross-view structure.
 
 ## Nonlinear signal
 
@@ -729,4 +729,3 @@ Signal sharing is an outcome-generation parameter. It controls how much predicti
 Differential-effect alignment controls whether spiked effects are placed along shared cross-view directions.
 
 These three ideas are related, but they are not interchangeable. High crosstalk can create redundant views. Fusion advantage is strongest when the outcome signal is distributed in a way that makes the views complementary or jointly informative.
-

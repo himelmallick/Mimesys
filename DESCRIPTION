@@ -1,23 +1,18 @@
 Package: MimeSys
-Title: Template-Based Multi-Omics Simulation for Benchmarking
+Title: Template-Based Multi-Omics Simulation
 Version: 0.0.0.9000
 Date: 2025-04-12
 Author: Himel Mallick <himel.mallick@merck.com>
 Maintainer: Himel Mallick <himel.mallick@merck.com>
-Description: MimeSys simulates multi-omics datasets from fitted real-data templates, preserving marginal distributions and within- and cross-view dependence while adding controllable aligned signal and continuous, binary, or survival outcomes for benchmarking.
+Description: MimeSys simulates multi-omics datasets from fitted real-data templates, preserving marginal distributions and within- and cross-view dependence while adding controllable aligned signal and continuous, binary, or survival outcomes for simulation studies.
 Suggests:
     ggplot2,
-    IntegratedLearner,
     knitr,
     MultiAssayExperiment,
-    randomForest,
+    rlang,
     rmarkdown,
-    S4Vectors,
-    stringr,
     SummarizedExperiment,
-    TCGAbiolinks,
-    testthat (>= 3.0.0),
-    UCSCXenaTools
+    testthat (>= 3.0.0)
 License: MIT + file LICENSE
 Encoding: UTF-8
 biocViews: Simulation, Software, Multiomics
