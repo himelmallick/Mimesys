@@ -1,18 +1,28 @@
 Package: MimeSys
-Title: Simulate Realistic Multi-Omics Datasets with Specified Structural and Sparsity Patterns
+Title: Template-Based Multi-Omics Simulation for Benchmarking
 Version: 0.0.0.9000
 Date: 2025-04-12
 Author: Himel Mallick <himel.mallick@merck.com>
 Maintainer: Himel Mallick <himel.mallick@merck.com>
-Description: MimeSys provides a set of validated simulation modules to generate realistic microbiome datasets with arbitrary association structures. 
-Suggests: knitr, rmarkdown
-VignetteBuilder: knitr
+Description: MimeSys simulates multi-omics datasets from fitted real-data templates, preserving marginal distributions and within- and cross-view dependence while adding controllable aligned signal and continuous, binary, or survival outcomes for benchmarking.
+Suggests:
+    ggplot2,
+    IntegratedLearner,
+    knitr,
+    MultiAssayExperiment,
+    randomForest,
+    rmarkdown,
+    S4Vectors,
+    stringr,
+    SummarizedExperiment,
+    TCGAbiolinks,
+    testthat (>= 3.0.0),
+    UCSCXenaTools
 License: MIT + file LICENSE
-LazyData: true
 Encoding: UTF-8
 biocViews: Simulation, Software, Multiomics
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.2
-Imports: VennDiagram, grid, caret, fields, ggplot2, InterSIM,
-        tidyverse, splatter, NMF, stringr, r.jive, reshape2, BiocManager
+VignetteBuilder: knitr
+Config/testthat/edition: 3
 NeedsCompilation: no
+Config/roxygen2/version: 8.1.0

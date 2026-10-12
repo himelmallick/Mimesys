@@ -2,50 +2,152 @@
 % Please edit documentation in R/gen_simmba.R
 \name{gen_simmba}
 \alias{gen_simmba}
-\title{This function generates simulated multi-omics data.}
+\title{Generate simulated multi-omics data for benchmarking}
 \usage{
 gen_simmba(
   nsample,
+  template,
+  p = NULL,
+  crosstalk = 1,
+  feature.select = c("random", "variance"),
+  feature.jitter = 0.2,
+  dependence = c("factor", "empirical_copula", "module_copula"),
+  cor.shrinkage = 0.05,
+  module.count = NULL,
+  module.between.shrinkage = 0.75,
+  view.models = NULL,
   snr = 1,
   p.train = 0.7,
-  de.prob = rep(0.1, 3),
-  de.downProb = rep(0.5, 3),
-  de.facLoc = rep(1, 3),
-  de.facScale = rep(0.4, 3),
-  ygen.mode = "Friedman",
+  de.prob = 0.1,
+  de.downProb = 0.5,
+  de.facLoc = 1,
+  de.facScale = 0.4,
+  de.align = NULL,
+  signal.share = NULL,
+  friedman.share = NULL,
+  ygen.mode = c("LM", "Friedman", "Friedman2", "SharedLatent"),
+  outcome.type = c("continuous", "binary", "survival"),
+  surv.hscale = 1,
+  cens.lower = 1,
+  cens.upper = 3,
   nrep = 100,
-  seed = 1234
+  seed = 1234,
+  ...
 )
 }
 \arguments{
-\item{nsample}{Sample size}
+\item{nsample}{Number of samples to simulate in each replicate before the
+train/test split.}
 
-\item{snr}{Signal to noise ratio}
+\item{template}{Either a \code{mimesys_template} from \code{fit_template()}
+(recommended: fit once, reuse) or a named list of sample x feature matrices,
+which is then fitted with \code{fit_template(template, ...)}.}
 
-\item{p.train}{Train-test split ratio}
+\item{p}{Feature counts per view. Use \code{NULL} to keep template sizes, a
+single integer to use the same count for every view, an unnamed vector in
+template view order, or a named vector with one value per view.}
 
-\item{de.prob}{DE probability across all modalities}
+\item{crosstalk}{Multiplier on template cross-view dependence. Use a scalar
+for the same value in every view or one value per view. A value of 0 removes
+shared latent structure, 1 uses the fitted template level, and values above
+1 amplify shared structure up to \code{crosstalk_max(template)}.}
 
-\item{de.downProb}{Down-regulation probability}
+\item{feature.select}{Feature choice rule passed to \code{sim_from_template()}
+when \code{p} is below the template feature count. Use \code{"random"} or
+\code{"variance"}.}
 
-\item{de.facLoc}{DE factor location}
+\item{feature.jitter}{Offspring-feature perturbation passed to
+\code{sim_from_template()} when \code{p} exceeds the template feature count.
+Values near 0 make offspring closer to their parent features; larger values
+add more loading-level perturbation.}
 
-\item{de.facScale}{DE factor scale}
+\item{dependence}{Dependence simulator passed to \code{sim_from_template()}.
+\code{"factor"} keeps the current low-rank template simulator; \code{"empirical_copula"}
+uses the empirical latent feature correlation more directly; and
+\code{"module_copula"} smooths the empirical latent correlation by feature
+modules.}
 
-\item{ygen.mode}{Y generation mode}
+\item{cor.shrinkage}{Shrinkage toward independence for
+\code{dependence = "empirical_copula"} or \code{"module_copula"}.}
 
-\item{nrep}{Number of repetitions}
+\item{module.count}{Number of within-view feature modules for
+\code{dependence = "module_copula"}. If \code{NULL}, a data-adaptive default is
+used per view.}
 
-\item{seed}{Random seed}
+\item{module.between.shrinkage}{How strongly to smooth correlations between
+modules in \code{dependence = "module_copula"}.}
+
+\item{view.models}{Optional named vector of per-view observation models passed
+to \code{sim_from_template()}. Use \code{"two_part_copula"} for sparse
+compositional microbiome views; unspecified views use \code{"continuous"}.}
+
+\item{snr}{Signal-to-noise ratio for continuous outcomes. Larger values
+create easier prediction tasks.}
+
+\item{p.train}{Proportion of samples assigned to the training split.}
+
+\item{de.prob}{Probability that a feature receives a nonzero spike-in
+coefficient; scalar or one value per view.}
+
+\item{de.downProb}{Probability that a nonzero spike-in coefficient is
+negative; scalar or one value per view.}
+
+\item{de.facLoc}{Location parameter for the log-normal effect-size factor;
+scalar or one value per view.}
+
+\item{de.facScale}{Scale parameter for the log-normal effect-size factor;
+scalar or one value per view.}
+
+\item{de.align}{NULL keeps the original spike-in (DE positions and signs drawn
+independently per view). A value between 0 and 1 places that fraction of DE
+features on features loading on the shared cross-view direction (sampled with
+probability proportional to the squared loading) with signs following that
+direction, so view-specific signals agree to the extent the views cross-talk.}
+
+\item{signal.share}{Optional numeric vector controlling the relative marginal
+variance contribution of each view's linear predictor. If NULL, spike-in
+coefficients are left on their original scale. If supplied, values are
+recycled or matched by view name, normalized to sum to one, and each view's
+coefficients are rescaled so its view-specific linear predictor has variance
+equal to the requested share. For example, \code{c(1, 1, 1)} creates a
+balanced complementary-signal setting where no view is intended to dominate.}
+
+\item{friedman.share}{Optional numeric vector controlling which views supply
+the five nonlinear Friedman features when \code{ygen.mode} is
+\code{"Friedman"} or \code{"Friedman2"}. Values are recycled or matched by
+view name and normalized to sum to one. If NULL, \code{signal.share} is used
+when available; otherwise Friedman features are sampled uniformly from all
+nonzero spiked features.}
+
+\item{ygen.mode}{Y generation mode: "LM", "Friedman", "Friedman2",
+or "SharedLatent". Friedman modes apply the Friedman formula after
+rank-transforming the selected simulated features to the unit interval.
+"SharedLatent" uses all simulated shared latent factors, combined as a
+standardized equal-weight score.}
+
+\item{outcome.type}{Outcome type: \code{"continuous"}, \code{"binary"}, or
+\code{"survival"}. Continuous and binary outcomes are stored as
+\code{Y}; survival outcomes are stored as \code{time} and \code{status}.}
+
+\item{surv.hscale}{Multiplicative scale on hazard for survival outcomes.}
+
+\item{cens.lower}{Lower bound for uniform censoring time.}
+
+\item{cens.upper}{Upper bound for uniform censoring time.}
+
+\item{nrep}{Number of independent simulation replicates.}
+
+\item{seed}{Random seed.}
+
+\item{...}{Passed to \code{fit_template()} when \code{template} is a raw list}
 }
 \value{
-List containing training and testing datasets
+List with trainDat, testDat, simulation parameters, the fitted
+template, realized canonical correlations (\code{cancor}) and per-replicate
+empirical agreement between view-specific linear predictors (\code{agreement.emp}).
 }
 \description{
-Generates simulated multi-omics datasets with specified parameters,
-including sample size, signal-to-noise ratio, DE probabilities,
-and response variable generation mode. It also splits the data into training and testing sets.
-}
-\examples{
-simulated_data <- gen_simmba(nsample = 100)
+Generates null multiview data from a real template (see \code{fit_template()}
+and \code{sim_from_template()}), spikes in signal, generates the outcome, and
+splits the data into training and testing sets.
 }
