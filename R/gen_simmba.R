@@ -72,6 +72,17 @@
 #'   rank-transforming the selected simulated features to the unit interval.
 #'   "SharedLatent" uses all simulated shared latent factors, combined as a
 #'   standardized equal-weight score.
+#' @param shared.latent.fun Response function used when
+#'   \code{ygen.mode = "SharedLatent"}. \code{"linear"} combines selected shared
+#'   latent factors as a standardized equal-weight score, preserving the previous
+#'   behavior. \code{"friedman"} applies the Friedman nonlinear function to the
+#'   first five selected shared latent factors after rank-transforming them to
+#'   the unit interval. \code{"friedman2"} adds the linear shared-latent score to
+#'   the Friedman nonlinear component.
+#' @param shared.latent.n_factors Number of shared latent factors to use for
+#'   \code{ygen.mode = "SharedLatent"}. If \code{NULL}, all available shared
+#'   factors are used. Friedman shared-latent functions require at least five
+#'   selected shared factors.
 #' @param outcome.type Outcome type: \code{"continuous"}, \code{"binary"}, or
 #'   \code{"survival"}. Continuous and binary outcomes are stored as
 #'   \code{Y}; survival outcomes are stored as \code{time} and \code{status}.
@@ -107,6 +118,8 @@ gen_simmba <- function(nsample,
                        signal.share = NULL,
                        friedman.share = NULL,
                        ygen.mode = c("LM", "Friedman", "Friedman2", "SharedLatent"),
+                       shared.latent.fun = c("linear", "friedman", "friedman2"),
+                       shared.latent.n_factors = NULL,
                        outcome.type = c("continuous", "binary", "survival"),
                        surv.hscale = 1,
                        cens.lower = 1,
@@ -117,9 +130,17 @@ gen_simmba <- function(nsample,
 
   set.seed(seed)
   ygen.mode      <- match.arg(ygen.mode)
+  shared.latent.fun <- match.arg(shared.latent.fun)
   outcome.type   <- match.arg(outcome.type)
   feature.select <- match.arg(feature.select)
   dependence     <- match.arg(dependence)
+  if (!is.null(shared.latent.n_factors)) {
+    if (!is.numeric(shared.latent.n_factors) || length(shared.latent.n_factors) != 1L ||
+        !is.finite(shared.latent.n_factors) || shared.latent.n_factors < 1) {
+      stop("shared.latent.n_factors must be NULL or a positive integer.", call. = FALSE)
+    }
+    shared.latent.n_factors <- as.integer(shared.latent.n_factors)
+  }
 
   ## 0. Fit the template once (skipped if a fitted template is supplied)
   tmpl  <- if (inherits(template, "mimesys_template")) template else fit_template(template, ...)
@@ -172,7 +193,12 @@ gen_simmba <- function(nsample,
     pcl$feature_metadata$beta <- beta0
 
     eta_lin <- rowSums(view_pred)
-    eta_shared <- .shared_latent_predictor(pcl, view_pred)
+    eta_shared <- .shared_latent_predictor(
+      pcl,
+      view_pred,
+      fun = shared.latent.fun,
+      n_factors = shared.latent.n_factors
+    )
     A <- suppressWarnings(stats::cor(view_pred))
     A[!is.finite(A)] <- 0
     agreement.emp[[k]] <- A
@@ -184,10 +210,7 @@ gen_simmba <- function(nsample,
       friedman_index <- .sample_friedman_features(candidate_index, fm$featureType, views, friedman.share)
       pcl$feature_metadata$friedman_term <- seq_len(nrow(pcl$feature_metadata)) %in% friedman_index
       X.friedman <- .rank_to_unit_interval(X[, friedman_index, drop = FALSE])
-      f <- function(x) {
-        10 * sin(pi * x[, 1] * x[, 2]) + 20 * (x[, 3] - 0.5)^2 + 10 * x[, 4] + 5 * x[, 5]
-      }
-      Xbeta.friedman <- f(X.friedman)
+      Xbeta.friedman <- .friedman_response(X.friedman)
     } else {
       pcl$feature_metadata$friedman_term <- FALSE
     }
@@ -244,6 +267,8 @@ gen_simmba <- function(nsample,
        de.prob = de.prob, de.downProb = de.downProb, de.facLoc = de.facLoc,
        de.facScale = de.facScale, de.align = de.align,
        signal.share = signal.share, friedman.share = friedman.share,
+       shared.latent.fun = shared.latent.fun,
+       shared.latent.n_factors = shared.latent.n_factors,
        nrep = nrep, seed = seed, ygen.mode = ygen.mode,
        outcome.type = outcome.type, surv.hscale = surv.hscale,
        cens.lower = cens.lower, cens.upper = cens.upper)
@@ -353,14 +378,55 @@ gen_simmba <- function(nsample,
   out
 }
 
-.shared_latent_predictor <- function(pcl, view_pred) {
+.friedman_response <- function(x) {
+  x <- as.matrix(x)
+  if (ncol(x) < 5L) {
+    stop("Friedman response requires at least five predictors.", call. = FALSE)
+  }
+  10 * sin(pi * x[, 1] * x[, 2]) + 20 * (x[, 3] - 0.5)^2 + 10 * x[, 4] + 5 * x[, 5]
+}
+
+.shared_latent_predictor <- function(pcl, view_pred, fun = c("linear", "friedman", "friedman2"),
+                                     n_factors = NULL) {
+  fun <- match.arg(fun)
   shared <- pcl$truth$shared
   if (is.matrix(shared) && ncol(shared) > 0L) {
+    if (!is.null(n_factors)) {
+      if (n_factors > ncol(shared)) {
+        stop(
+          "shared.latent.n_factors = ", n_factors,
+          " but only ", ncol(shared), " shared latent factor(s) are available.",
+          call. = FALSE
+        )
+      }
+      shared <- shared[, seq_len(n_factors), drop = FALSE]
+    }
     shared_scaled <- scale(shared)
     shared_scaled[!is.finite(shared_scaled)] <- 0
-    return(.standardize_predictor(rowSums(shared_scaled) / sqrt(ncol(shared_scaled))))
+    eta_linear <- .standardize_predictor(rowSums(shared_scaled) / sqrt(ncol(shared_scaled)))
+
+    if (identical(fun, "linear")) {
+      return(eta_linear)
+    }
+    if (ncol(shared_scaled) < 5L) {
+      stop(
+        "shared.latent.fun = '", fun,
+        "' requires at least five selected shared latent factors; only ",
+        ncol(shared_scaled), " are available. Increase shared.rank in fit_template() ",
+        "or use shared.latent.fun = 'linear'.",
+        call. = FALSE
+      )
+    }
+    eta_friedman <- .standardize_predictor(.friedman_response(.rank_to_unit_interval(shared_scaled[, seq_len(5), drop = FALSE])))
+    if (identical(fun, "friedman")) {
+      return(eta_friedman)
+    }
+    return(.standardize_predictor(eta_linear + eta_friedman))
   }
 
+  if (!identical(fun, "linear")) {
+    stop("Nonlinear shared latent outcomes require simulated shared latent factors.", call. = FALSE)
+  }
   view_pred <- as.matrix(view_pred)
   if (ncol(view_pred) == 0L) {
     stop("Cannot construct shared latent predictor without shared scores or view predictors.", call. = FALSE)

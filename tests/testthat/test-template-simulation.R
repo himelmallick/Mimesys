@@ -158,6 +158,100 @@ test_that("shared latent outcome uses all available shared factors", {
   expect_false(isTRUE(all.equal(expected, as.numeric(scale(shared_train[, 1])), tolerance = 1e-8)))
 })
 
+test_that("shared latent outcome can use selected factors and nonlinear functions", {
+  set.seed(15)
+  n <- 110
+  shared <- matrix(stats::rnorm(n * 5), n, 5)
+  template <- list(
+    mrna = shared %*% matrix(stats::rnorm(5 * 24), 5, 24) + matrix(stats::rnorm(n * 24), n, 24),
+    protein = shared %*% matrix(stats::rnorm(5 * 24), 5, 24) + matrix(stats::rnorm(n * 24), n, 24)
+  )
+  rownames(template$mrna) <- rownames(template$protein) <- paste0("S", seq_len(n))
+
+  tm <- fit_template(template, rank = 6, shared.rank = 5)
+  sim_linear_3 <- gen_simmba(
+    nsample = 80,
+    template = tm,
+    p = c(mrna = 14, protein = 14),
+    ygen.mode = "SharedLatent",
+    shared.latent.fun = "linear",
+    shared.latent.n_factors = 3,
+    crosstalk = 1,
+    nrep = 1,
+    seed = 151
+  )
+  sim_friedman <- gen_simmba(
+    nsample = 80,
+    template = tm,
+    p = c(mrna = 14, protein = 14),
+    ygen.mode = "SharedLatent",
+    shared.latent.fun = "friedman",
+    shared.latent.n_factors = 5,
+    crosstalk = 1,
+    nrep = 1,
+    seed = 151
+  )
+  sim_friedman2 <- gen_simmba(
+    nsample = 80,
+    template = tm,
+    p = c(mrna = 14, protein = 14),
+    ygen.mode = "SharedLatent",
+    shared.latent.fun = "friedman2",
+    shared.latent.n_factors = 5,
+    crosstalk = 1,
+    nrep = 1,
+    seed = 151
+  )
+
+  shared_train <- sim_linear_3$trainDat[[1]]$truth$shared
+  shared_test <- sim_linear_3$testDat[[1]]$truth$shared
+  shared_all <- rbind(shared_train, shared_test)
+  id_all <- c(
+    sim_linear_3$trainDat[[1]]$sample_metadata$subjectID,
+    sim_linear_3$testDat[[1]]$sample_metadata$subjectID
+  )
+  expected_all <- as.numeric(scale(rowSums(scale(shared_all[, 1:3, drop = FALSE])) / sqrt(3)))
+  names(expected_all) <- id_all
+  expected <- unname(expected_all[sim_linear_3$trainDat[[1]]$sample_metadata$subjectID])
+
+  expect_equal(sim_linear_3$shared.latent.fun, "linear")
+  expect_equal(sim_linear_3$shared.latent.n_factors, 3)
+  expect_equal(sim_linear_3$trainDat[[1]]$sample_metadata$Xbeta_shared, expected, tolerance = 1e-8)
+  expect_true(all(is.finite(sim_friedman$trainDat[[1]]$sample_metadata$Xbeta_shared)))
+  expect_true(all(is.finite(sim_friedman2$trainDat[[1]]$sample_metadata$Xbeta_shared)))
+  expect_false(isTRUE(all.equal(
+    sim_friedman$trainDat[[1]]$sample_metadata$Xbeta_shared,
+    sim_friedman2$trainDat[[1]]$sample_metadata$Xbeta_shared,
+    tolerance = 1e-8
+  )))
+})
+
+test_that("nonlinear shared latent outcomes require five shared factors", {
+  set.seed(16)
+  n <- 70
+  shared <- matrix(stats::rnorm(n * 2), n, 2)
+  template <- list(
+    mrna = shared %*% matrix(stats::rnorm(2 * 16), 2, 16) + matrix(stats::rnorm(n * 16), n, 16),
+    protein = shared %*% matrix(stats::rnorm(2 * 16), 2, 16) + matrix(stats::rnorm(n * 16), n, 16)
+  )
+  rownames(template$mrna) <- rownames(template$protein) <- paste0("S", seq_len(n))
+
+  tm <- fit_template(template, rank = 4, shared.rank = 2)
+  expect_error(
+    gen_simmba(
+      nsample = 60,
+      template = tm,
+      p = c(mrna = 12, protein = 12),
+      ygen.mode = "SharedLatent",
+      shared.latent.fun = "friedman",
+      crosstalk = 1,
+      nrep = 1,
+      seed = 161
+    ),
+    "requires at least five"
+  )
+})
+
 test_that("simulation summaries report key settings", {
   set.seed(23)
   n <- 50

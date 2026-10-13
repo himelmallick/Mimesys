@@ -632,7 +632,16 @@ MimeSys uses the shared latent factors generated during null data simulation. In
 eta_shared = rowSums(scale(shared_factors)) / sqrt(number_of_factors)
 ```
 
-The outcome is then generated from this shared latent score with noise controlled by `snr`.
+The outcome is then generated from this shared latent score with noise controlled by `snr`. By default, `SharedLatent` uses all available shared factors and a linear equal-weight score. You can control this more directly with:
+
+```r
+shared.latent.fun = "linear"     # default
+shared.latent.fun = "friedman"   # nonlinear Friedman response on shared factors
+shared.latent.fun = "friedman2"  # linear shared score plus Friedman response
+shared.latent.n_factors = 5      # first K shared factors to use
+```
+
+The nonlinear shared-latent functions rank-transform the selected shared factors to the unit interval before applying the Friedman response. They require at least five selected shared factors, so fit the template with `shared.rank >= 5` when using `shared.latent.fun = "friedman"` or `"friedman2"`.
 
 This mode is useful when the true outcome is driven by a cross-view latent process rather than view-specific feature effects.
 

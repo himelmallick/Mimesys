@@ -515,6 +515,20 @@ where \(S\) is the simulated shared latent factor matrix and \(r\) is the number
 
 This mode uses all available shared factors, not just the first factor.
 
+The shared-latent outcome can also be controlled at the latent-factor level:
+
+```{r shared-latent-functions, purl=FALSE}
+sim <- gen_simmba(
+  nsample = 200,
+  template = template,
+  ygen.mode = "SharedLatent",
+  shared.latent.fun = "friedman2",
+  shared.latent.n_factors = 5
+)
+```
+
+`shared.latent.fun = "linear"` is the default and preserves the equal-weight linear score above. `shared.latent.fun = "friedman"` applies a nonlinear Friedman response to the first five selected shared factors after rank-transforming them to \([0, 1]\). `shared.latent.fun = "friedman2"` adds the linear shared-latent score and the nonlinear Friedman component. The nonlinear functions require at least five selected shared latent factors, so use `fit_template(..., shared.rank = 5)` or larger when you want these modes.
+
 ## `outcome.type`
 
 `outcome.type` controls the observed outcome.

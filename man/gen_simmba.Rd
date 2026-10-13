@@ -26,6 +26,8 @@ gen_simmba(
   signal.share = NULL,
   friedman.share = NULL,
   ygen.mode = c("LM", "Friedman", "Friedman2", "SharedLatent"),
+  shared.latent.fun = c("linear", "friedman", "friedman2"),
+  shared.latent.n_factors = NULL,
   outcome.type = c("continuous", "binary", "survival"),
   surv.hscale = 1,
   cens.lower = 1,
@@ -124,6 +126,19 @@ or "SharedLatent". Friedman modes apply the Friedman formula after
 rank-transforming the selected simulated features to the unit interval.
 "SharedLatent" uses all simulated shared latent factors, combined as a
 standardized equal-weight score.}
+
+\item{shared.latent.fun}{Response function used when
+\code{ygen.mode = "SharedLatent"}. \code{"linear"} combines selected shared
+latent factors as a standardized equal-weight score, preserving the previous
+behavior. \code{"friedman"} applies the Friedman nonlinear function to the
+first five selected shared latent factors after rank-transforming them to
+the unit interval. \code{"friedman2"} adds the linear shared-latent score to
+the Friedman nonlinear component.}
+
+\item{shared.latent.n_factors}{Number of shared latent factors to use for
+\code{ygen.mode = "SharedLatent"}. If \code{NULL}, all available shared
+factors are used. Friedman shared-latent functions require at least five
+selected shared factors.}
 
 \item{outcome.type}{Outcome type: \code{"continuous"}, \code{"binary"}, or
 \code{"survival"}. Continuous and binary outcomes are stored as

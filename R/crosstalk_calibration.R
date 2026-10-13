@@ -223,6 +223,8 @@ summarize_simulation <- function(sim) {
     dependence = sim$dependence,
     ygen.mode = sim$ygen.mode,
     outcome.type = sim$outcome.type,
+    shared.latent.fun = sim$shared.latent.fun,
+    shared.latent.n_factors = sim$shared.latent.n_factors,
     signal.share = sim$signal.share,
     friedman.share = sim$friedman.share,
     de.align = sim$de.align,
@@ -244,6 +246,12 @@ print.mimesys_simulation_summary <- function(x, ...) {
   cat("  Features: ", paste(names(x$feature_counts), x$feature_counts, sep = "=", collapse = ", "), "\n", sep = "")
   cat("  Crosstalk: ", paste(x$crosstalk, collapse = ", "), "\n", sep = "")
   cat("  Outcome: ", x$outcome.type, " | ", x$ygen.mode, "\n", sep = "")
+  if (identical(x$ygen.mode, "SharedLatent")) {
+    shared_fun <- if (is.null(x$shared.latent.fun)) "linear" else x$shared.latent.fun
+    shared_n <- if (is.null(x$shared.latent.n_factors)) "all" else x$shared.latent.n_factors
+    cat("  Shared latent function: ", shared_fun, "\n", sep = "")
+    cat("  Shared latent factors: ", shared_n, "\n", sep = "")
+  }
   cat("  Dependence: ", x$dependence, "\n", sep = "")
   if (!is.null(x$signal.share)) {
     cat("  Signal share: ", paste(names(x$signal.share), round(x$signal.share, 3), sep = "=", collapse = ", "), "\n", sep = "")
