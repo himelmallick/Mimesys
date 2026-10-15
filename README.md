@@ -28,49 +28,145 @@ devtools::load_all(".")
 
 Core packages used by MimeSys include `Matrix`, `MASS`, `mvtnorm`, `ggplot2`, and `dplyr`.
 
-## Basic Workflow
+## Basic Workflow: MultiAssayExperiment
 
-The typical workflow has three steps.
+MimeSys is designed for Bioconductor containers. The recommended workflow uses a
+`MultiAssayExperiment` (MAE), with one `SummarizedExperiment` per omics view.
+Assays follow the usual Bioconductor orientation: features in rows and samples
+in columns.
 
 ```r
 library(MimeSys)
+library(MultiAssayExperiment)
 
-# 1. Split an empirical multi-omics dataset into named omics views
-views <- list(
-  Immunome   = immunome_matrix,
-  Metabolome = metabolome_matrix,
-  Proteome   = proteome_matrix
-)
-
-# 2. Fit a simulation template
+# Fit once and reuse the template across simulation settings.
 template <- fit_template(
-  views,
-  rank = 10,
-  view.transform = "none"
+  mae,
+  rank = NULL,
+  view.transform = c(Microbiome = "clr", Metabolome = "log1p")
 )
 
-# 3. Generate simulated data from the fitted template
-sim <- gen_simmba(
+# Simulate one MAE. Defaults create a balanced, aligned, continuous linear
+# outcome while retaining the template's factor-based null structure.
+sim_mae <- simulate_mimesys(
   template = template,
-  nsample = 200,
+  n = 200,
   p = c(Immunome = 200, Metabolome = 200, Proteome = 200),
-  crosstalk = 0.5,
-  nrep = 20,
-  ygen.mode = "LM",
-  outcome.type = "continuous",
-  signal.share = c(Immunome = 1, Metabolome = 1, Proteome = 1),
-  de.align = 1,
-  snr = 1
+  outcome = "shared_latent",
+  seed = 1
 )
 
-summarize_simulation(sim)
+# Standard Bioconductor accessors
+experiments(sim_mae)
+colData(sim_mae)[, c("Y", "split")]
+rowData(experiments(sim_mae)[["Proteome"]])
+metadata(sim_mae)$simulation
 ```
 
-The returned object contains simulated training and test data for each replicate, along with metadata describing the simulation settings.
+`simulate_mimesys()` returns a `MultiAssayExperiment` for one replicate. Its
+simulated values are stored in the `"simulated"` assay of each experiment.
+Outcome and train/test membership are in `colData()`, feature-level spike-in
+truth is in each experiment's `rowData()`, and complete simulation settings and
+latent truth are in `metadata()`.
+
+Start by checking an empirical input before fitting a template:
+
+```r
+input_report <- validate_mimesys_input(mae)
+input_report
+attr(input_report, "common_samples")
+```
+
+This reports samples, features, missing values, constant features, and the
+number of primary samples shared across views. `fit_template()` will stop on
+structurally incompatible inputs, while this report makes the reason visible
+before fitting.
+
+By default, MimeSys first calibrates crosstalk on simulated **null** data. It
+compares observed and simulated cross-view feature-correlation blocks over a
+small grid, selects the value with the lowest cross-block reconstruction error,
+and then uses that value for the requested outcome simulation. The complete
+calibration result is retained in
+`metadata(sim_mae)$simulation$crosstalk_calibration`. Supply a numeric
+`crosstalk` only when intentionally overriding that empirical calibration.
+Calibration uses the template's original sample size and all matched empirical
+features by default; set `calibration$nsample` or
+`calibration$max_features_per_view` only when a faster approximation is needed.
+
+Use `simulate_mimesys_null()` when only null multi-omics features are needed:
+
+```r
+null_mae <- simulate_mimesys_null(
+  template,
+  n = 200,
+  p = 200,
+  seed = 1
+)
+```
+
+This returns an MAE with no `Y`, no spike-in coefficients, and the selected
+crosstalk plus calibration diagnostics in `metadata(null_mae)$simulation`.
+
+Every fitted template, calibration result, and MAE simulation also records the
+MimeSys version, UTC creation time, random seed, selected crosstalk, and source
+template provenance. For a simulated MAE, use
+`metadata(sim_mae)$simulation$provenance`.
+
+Use compact lists only when you need to depart from defaults:
+
+```r
+sim_mae <- simulate_mimesys(
+  template,
+  n = 200,
+  p = 200,
+  crosstalk = 0.75,
+  outcome = list(
+    model = "shared_latent",
+    shared_latent_function = "friedman2",
+    shared_latent_n_factors = 5
+  ),
+  signal = list(
+    alignment = 1,
+    share = c(Immunome = 1, Metabolome = 1, Proteome = 1)
+  ),
+  null_model = list(
+    dependence = "factor"
+  ),
+  seed = 1
+)
+```
+
+Built-in presets make common outcome scenarios explicit:
+
+```r
+mimesys_presets()
+
+sim_mae <- simulate_mimesys(
+  template,
+  n = 200,
+  p = 200,
+  preset = "shared_latent_friedman2",
+  outcome = list(shared_latent_n_factors = 5),
+  seed = 1
+)
+```
+
+Available presets are `"linear"`, `"friedman"`, `"friedman2"`,
+`"shared_latent"`, `"shared_latent_friedman"`, and
+`"shared_latent_friedman2"`. The default is `"default"`, an aligned linear
+outcome. Explicit fields in `outcome`, `signal`, or `null_model` override their
+preset values.
+
+For `nrep > 1`, the function returns a `mimesys_mae_simulation` object whose
+`$replicates` element is a named list of MAEs. Set `return_type = "simulation"`
+to access the lower-level legacy result from `gen_simmba()`.
 
 ## Input Data
 
-Input data should be supplied as a named list of matrices or matrix-like objects.
+`fit_template()` accepts a `MultiAssayExperiment` directly. It also accepts a
+single `SummarizedExperiment` or a named list of matrices for interoperability.
+Matrices use the internal MimeSys orientation, samples in rows and features in
+columns; MAE and SummarizedExperiment assays are transposed automatically.
 
 ```r
 views <- list(
@@ -80,7 +176,8 @@ views <- list(
 )
 ```
 
-Each matrix should have samples in rows and features in columns. All views should contain the same samples in the same order unless you have already handled matching externally.
+All MAE experiments should refer to shared primary sample IDs. `fit_template()`
+matches samples across views by ID before learning the template.
 
 Names matter. View names are carried through the template, the simulation output, and the outcome-generation metadata. They are also used by arguments such as `p`, `signal.share`, `friedman.share`, `view.models`, and named `view.transform` vectors.
 
@@ -108,7 +205,11 @@ A named list of omics matrices. Rows are samples and columns are features. The a
 
 The number of latent factors to estimate from the empirical data.
 
-If `rank` is supplied, the template uses exactly that number of factors. If `rank = NULL`, MimeSys chooses the number of factors using `var.explained`.
+If `rank` is supplied, the template uses exactly that number of factors. If
+`rank = NULL`, MimeSys chooses the number of factors using `var.explained`.
+Alternatively, `rank = "2logp"` uses `ceiling(2 * log(p_m))` factors for view
+`m`, subject to `max.rank`. This is a useful high-dimensional default when a
+fixed, feature-count-aware rank is preferred over variance-threshold selection.
 
 ### `var.explained`
 
@@ -507,6 +608,39 @@ plot_crosstalk_calibration(cal)
 ```
 
 `calibrate_crosstalk()` runs the null simulator over a grid of crosstalk values and summarizes the resulting cross-view correlation behavior. `plot_crosstalk_calibration()` visualizes whether increasing crosstalk produces the expected increase in empirical cross-view correlation.
+
+Calibration includes uncertainty diagnostics. `cal$selection_frequency` gives
+the fraction of null replicates selecting each candidate value, and
+`cal$near_optimal` lists values within one standard error of the smallest mean
+cross-block distance. These make it clear when the selected value is decisive
+versus when several crosstalk values reconstruct the template equally well.
+
+## Template validation report
+
+`validate_template()` creates one compact report before a simulation study. It
+calibrates crosstalk, simulates a null dataset at the selected value, and checks
+cross-block reconstruction error, correlation-pattern preservation, and
+marginal quantile preservation.
+
+```r
+report <- validate_template(
+  template,
+  p = c(Immunome = 200, Metabolome = 200, Proteome = 200),
+  nrep = 10,
+  crosstalk_grid = seq(0, 1, by = 0.1),
+  seed = 1
+)
+
+report
+plot_template_validation(report, "calibration")
+plot_template_validation(report, "correlation_structure")
+plot_template_validation(report, "marginal")
+```
+
+The calibration objective uses the rescaled Frobenius RMSE between matching
+empirical and simulated **cross-view** feature-correlation blocks. It therefore
+requires shared feature names; simulated offspring features are not used in this
+comparison.
 
 Useful arguments:
 

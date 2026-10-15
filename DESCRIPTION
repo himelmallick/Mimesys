@@ -5,13 +5,15 @@ Date: 2025-04-12
 Author: Himel Mallick <himel.mallick@merck.com>
 Maintainer: Himel Mallick <himel.mallick@merck.com>
 Description: MimeSys simulates multi-omics datasets from fitted real-data templates, preserving marginal distributions and within- and cross-view dependence while adding controllable aligned signal and continuous, binary, or survival outcomes for simulation studies.
+Imports:
+    MultiAssayExperiment,
+    S4Vectors,
+    SummarizedExperiment
 Suggests:
     ggplot2,
     knitr,
-    MultiAssayExperiment,
     rlang,
     rmarkdown,
-    SummarizedExperiment,
     testthat (>= 3.0.0)
 License: MIT + file LICENSE
 Encoding: UTF-8
@@ -20,4 +22,4 @@ Roxygen: list(markdown = TRUE)
 VignetteBuilder: knitr
 Config/testthat/edition: 3
 NeedsCompilation: no
-Config/roxygen2/version: 8.1.0
+Config/roxygen2/version: 8.1.1

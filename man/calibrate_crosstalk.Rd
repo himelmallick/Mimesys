@@ -10,7 +10,9 @@ calibrate_crosstalk(
   nsample = NULL,
   nrep = 5,
   p = NULL,
-  max_features_per_view = p,
+  feature.select = c("random", "variance"),
+  feature.jitter = 0.2,
+  max_features_per_view = NULL,
   dependence = c("factor", "empirical_copula", "module_copula"),
   cor.shrinkage = 0.05,
   module.count = NULL,
@@ -32,27 +34,32 @@ calibrate_crosstalk(
 
 \item{p}{Optional named integer vector of simulated features per view.}
 
+\item{feature.select, feature.jitter}{Feature-generation settings passed to
+\code{sim_from_template()}.}
+
 \item{max_features_per_view}{Optional named cap used when computing
-correlation distances.}
+correlation distances. If \code{NULL}, every matched empirical feature is used.}
 
-\item{dependence}{Dependence simulator passed to \code{gen_simmba()}.}
+\item{dependence}{Dependence simulator passed to \code{sim_from_template()}.}
 
-\item{cor.shrinkage}{Shrinkage passed to \code{gen_simmba()} when
+\item{cor.shrinkage}{Shrinkage passed to \code{sim_from_template()} when
 \code{dependence = "empirical_copula"} or \code{"module_copula"}.}
 
 \item{module.count, module.between.shrinkage}{Module-copula parameters passed
 to \code{gen_simmba()}.}
 
 \item{view.models}{Optional named vector of per-view observation models passed
-to \code{gen_simmba()}.}
+to \code{sim_from_template()}.}
 
 \item{seed}{Random seed.}
 
 \item{...}{Passed to \code{fit_template()} when \code{template} is raw data.}
 }
 \value{
-A list with replicate-level distances, summarized distances, and the
-best crosstalk value.
+A list with replicate-level distances, summarized distances, the
+selected crosstalk value, selection frequencies across null replicates,
+and a near-optimal set defined as values within one standard error of the
+minimum mean cross-block distance.
 }
 \description{
 Sweeps candidate crosstalk values, simulates null data from the supplied

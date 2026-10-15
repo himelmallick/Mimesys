@@ -19,9 +19,11 @@
 #'
 #' @param template Named list of numeric matrices, samples in rows and features
 #'   in columns. Rows are matched by rownames when present, otherwise by position.
-#' @param rank Optional factors per view (scalar or one per view). If NULL, the
-#'   smallest rank explaining \code{var.explained} of normal-score variance,
-#'   capped at \code{max.rank}.
+#' @param rank Optional factors per view (scalar or one per view). Use
+#'   \code{"2logp"} to retain \code{ceiling(2 * log(p_m))} factors in view
+#'   \code{m}, subject to \code{max.rank}. If NULL, the smallest rank explaining
+#'   \code{var.explained} of normal-score variance is selected, capped at
+#'   \code{max.rank}.
 #' @param var.explained Target variance fraction when \code{rank} is NULL.
 #' @param max.rank Cap on the per-view rank (default floor(n0 / 3)).
 #' @param shared.rank Number of shared variates r. If NULL, chosen by parallel
@@ -38,6 +40,7 @@ fit_template <- function(template, rank = NULL, var.explained = 0.7,
                          max.rank = NULL, shared.rank = NULL, nperm = 50,
                          view.transform = NULL) {
 
+  rank_input <- rank
   template <- as_mimesys_view_list(template)
   template <- .mimesys_apply_view_transforms(template, view.transform = view.transform)
   view_transform <- attr(template, "view.transform")
@@ -58,10 +61,16 @@ fit_template <- function(template, rank = NULL, var.explained = 0.7,
   }
   n0 <- nrow(template[[1]])
   if (is.null(max.rank)) max.rank <- max(1, floor(n0 / 3))
-  if (!is.null(rank)) rank <- rep_len(rank, M)
+  rank_2logp <- is.character(rank) && length(rank) == 1L && identical(rank, "2logp")
+  if (is.character(rank) && !rank_2logp) {
+    stop("rank must be NULL, numeric, or \"2logp\".", call. = FALSE)
+  }
+  if (!is.null(rank) && !rank_2logp) rank <- rep_len(rank, M)
 
   fits <- vector("list", M)
+  observed <- vector("list", M)
   names(fits) <- views
+  names(observed) <- views
   for (m in seq_len(M)) {
     X <- template[[m]]
     if (is.null(colnames(X))) colnames(X) <- paste0(views[m], "_", seq_len(ncol(X)))
@@ -71,6 +80,9 @@ fit_template <- function(template, rank = NULL, var.explained = 0.7,
     }
     keep <- apply(X, 2, function(v) length(unique(v)) > 1)
     X <- X[, keep, drop = FALSE]
+    ## Retain the exact empirical matrix used to fit this view. Crosstalk
+    ## calibration compares null simulations against this observed structure.
+    observed[[m]] <- X
 
     ## (i) Marginals: sorted values define the empirical quantile function
     qmat <- apply(X, 2, sort)
@@ -84,7 +96,13 @@ fit_template <- function(template, rank = NULL, var.explained = 0.7,
     ## (ii) Within-view factor model via truncated SVD
     d  <- svd(Z, nu = 0, nv = 0)$d
     ve <- cumsum(d^2) / sum(d^2)
-    k  <- if (!is.null(rank)) rank[m] else which(ve >= var.explained)[1]
+    k  <- if (rank_2logp) {
+      ceiling(2 * log(ncol(X)))
+    } else if (!is.null(rank)) {
+      rank[m]
+    } else {
+      which(ve >= var.explained)[1]
+    }
     k  <- as.integer(max(1, min(k, max.rank, ncol(X) - 1)))
     sv <- svd(Z, nu = k, nv = k)
     Lambda <- sv$v[, 1:k, drop = FALSE] %*% diag(sv$d[1:k] / sqrt(n0 - 1), k)
@@ -128,10 +146,44 @@ fit_template <- function(template, rank = NULL, var.explained = 0.7,
     }
   }
 
-  structure(list(views = views, n0 = n0, fits = fits, B = B, shared.rank = r,
+  provenance <- list(
+    package_version = as.character(utils::packageVersion("MimeSys")),
+    fitted_at = format(Sys.time(), tz = "UTC", usetz = TRUE),
+    rank_input = rank_input,
+    var_explained = var.explained,
+    max_rank = max.rank,
+    shared_rank_input = shared.rank,
+    nperm = nperm,
+    view_transform = view_transform,
+    input_dimensions = data.frame(
+      view = views,
+      samples = vapply(observed, nrow, integer(1)),
+      features = vapply(observed, ncol, integer(1)),
+      row.names = NULL
+    )
+  )
+  structure(list(views = views, n0 = n0, fits = fits, observed = observed,
+                 B = B, shared.rank = r,
                  gcca.eigen = eig_obs, gcca.threshold = thr,
-                 view.transform = view_transform),
+                 view.transform = view_transform, provenance = provenance),
             class = "mimesys_template")
+}
+
+#' @export
+print.mimesys_template <- function(x, ...) {
+  cat("MimeSys template\n")
+  cat("  Views: ", paste(x$views, collapse = ", "), "\n", sep = "")
+  cat("  Matched samples: ", x$n0, "\n", sep = "")
+  ranks <- vapply(x$fits, function(f) f$rank, integer(1))
+  features <- vapply(x$fits, function(f) nrow(f$Lambda), integer(1))
+  cat("  Features: ", paste(names(features), features, sep = "=", collapse = ", "), "\n", sep = "")
+  cat("  Within-view ranks: ", paste(names(ranks), ranks, sep = "=", collapse = ", "), "\n", sep = "")
+  cat("  Shared rank: ", x$shared.rank, "\n", sep = "")
+  cat("  Calibration-ready: ", !is.null(x$observed), "\n", sep = "")
+  if (!is.null(x$provenance$package_version)) {
+    cat("  MimeSys version: ", x$provenance$package_version, "\n", sep = "")
+  }
+  invisible(x)
 }
 
 

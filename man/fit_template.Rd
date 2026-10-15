@@ -18,9 +18,11 @@ fit_template(
 \item{template}{Named list of numeric matrices, samples in rows and features
 in columns. Rows are matched by rownames when present, otherwise by position.}
 
-\item{rank}{Optional factors per view (scalar or one per view). If NULL, the
-smallest rank explaining \code{var.explained} of normal-score variance,
-capped at \code{max.rank}.}
+\item{rank}{Optional factors per view (scalar or one per view). Use
+\code{"2logp"} to retain \code{ceiling(2 * log(p_m))} factors in view
+\code{m}, subject to \code{max.rank}. If NULL, the smallest rank explaining
+\code{var.explained} of normal-score variance is selected, capped at
+\code{max.rank}.}
 
 \item{var.explained}{Target variance fraction when \code{rank} is NULL.}
 

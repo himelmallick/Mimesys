@@ -10,20 +10,24 @@
 #' @param nsample Number of simulated samples per replicate.
 #' @param nrep Number of replicates per crosstalk value.
 #' @param p Optional named integer vector of simulated features per view.
+#' @param feature.select,feature.jitter Feature-generation settings passed to
+#'   \code{sim_from_template()}.
 #' @param max_features_per_view Optional named cap used when computing
-#'   correlation distances.
-#' @param dependence Dependence simulator passed to \code{gen_simmba()}.
-#' @param cor.shrinkage Shrinkage passed to \code{gen_simmba()} when
+#'   correlation distances. If `NULL`, every matched empirical feature is used.
+#' @param dependence Dependence simulator passed to \code{sim_from_template()}.
+#' @param cor.shrinkage Shrinkage passed to \code{sim_from_template()} when
 #'   \code{dependence = "empirical_copula"} or `"module_copula"`.
 #' @param module.count,module.between.shrinkage Module-copula parameters passed
 #'   to \code{gen_simmba()}.
 #' @param view.models Optional named vector of per-view observation models passed
-#'   to \code{gen_simmba()}.
+#'   to \code{sim_from_template()}.
 #' @param seed Random seed.
 #' @param ... Passed to \code{fit_template()} when \code{template} is raw data.
 #'
-#' @return A list with replicate-level distances, summarized distances, and the
-#'   best crosstalk value.
+#' @return A list with replicate-level distances, summarized distances, the
+#'   selected crosstalk value, selection frequencies across null replicates,
+#'   and a near-optimal set defined as values within one standard error of the
+#'   minimum mean cross-block distance.
 #' @export
 calibrate_crosstalk <- function(
   template,
@@ -31,7 +35,9 @@ calibrate_crosstalk <- function(
   nsample = NULL,
   nrep = 5,
   p = NULL,
-  max_features_per_view = p,
+  feature.select = c("random", "variance"),
+  feature.jitter = 0.2,
+  max_features_per_view = NULL,
   dependence = c("factor", "empirical_copula", "module_copula"),
   cor.shrinkage = 0.05,
   module.count = NULL,
@@ -41,12 +47,16 @@ calibrate_crosstalk <- function(
   ...
 ) {
   dependence <- match.arg(dependence)
+  feature.select <- match.arg(feature.select)
+  set.seed(seed)
   observed_matrices <- if (inherits(template, "mimesys_template")) {
-    lapply(template$fits, function(f) {
-      x <- f$qmat
-      colnames(x) <- rownames(f$Lambda)
-      x
-    })
+    if (is.null(template$observed)) {
+      stop(
+        "This fitted template does not retain its empirical matrices. Refit it with fit_template() before calibrating crosstalk.",
+        call. = FALSE
+      )
+    }
+    template$observed
   } else {
     as_mimesys_view_list(template)
   }
@@ -58,14 +68,13 @@ calibrate_crosstalk <- function(
   rows <- list()
   idx <- 1L
   for (ct in crosstalk_grid) {
-    sim <- gen_simmba(
-      nsample = nsample,
-      template = tmpl,
+    pcl <- sim_from_template(
+      tmpl = tmpl,
+      n = nsample,
       p = p,
       crosstalk = ct,
-      de.align = NULL,
-      nrep = nrep,
-      seed = seed + as.integer(round(10000 * ct)),
+      feature.select = feature.select,
+      feature.jitter = feature.jitter,
       dependence = dependence,
       cor.shrinkage = cor.shrinkage,
       module.count = module.count,
@@ -73,12 +82,19 @@ calibrate_crosstalk <- function(
       view.models = view.models
     )
     for (rep_idx in seq_len(nrep)) {
-      sim_mats <- simulation_view_matrices(
-        sim,
-        rep = rep_idx,
-        split = "train",
-        feature_names = "template_feature"
-      )
+      ## Use a fresh null replicate for every distance calculation. No outcome
+      ## generation or spike-in parameters enter crosstalk calibration.
+      if (rep_idx > 1L) {
+        pcl <- sim_from_template(
+          tmpl = tmpl, n = nsample, p = p, crosstalk = ct,
+          feature.select = feature.select, feature.jitter = feature.jitter,
+          dependence = dependence, cor.shrinkage = cor.shrinkage,
+          module.count = module.count,
+          module.between.shrinkage = module.between.shrinkage,
+          view.models = view.models
+        )
+      }
+      sim_mats <- .mimesys_pcl_view_matrices(pcl, feature_names = "template_feature")
       distances <- feature_correlation_frobenius(
         observed_matrices = observed_matrices,
         simulated_matrices = sim_mats,
@@ -95,18 +111,67 @@ calibrate_crosstalk <- function(
   summary <- .mimesys_summarize_frobenius(raw)
   cross <- summary[!summary$diagonal_block, , drop = FALSE]
   best <- cross[which.min(cross$mean), , drop = FALSE]
+  cross_by_replicate <- stats::aggregate(
+    rescaled_frobenius ~ crosstalk + rep,
+    data = raw[!raw$diagonal_block, , drop = FALSE],
+    FUN = mean
+  )
+  chosen_by_replicate <- do.call(rbind, lapply(
+    split(cross_by_replicate, cross_by_replicate$rep),
+    function(x) x[which.min(x$rescaled_frobenius), , drop = FALSE]
+  ))
+  selection_frequency <- as.data.frame(table(
+    factor(chosen_by_replicate$crosstalk, levels = sort(unique(raw$crosstalk)))
+  ))
+  names(selection_frequency) <- c("crosstalk", "n_selected")
+  selection_frequency$crosstalk <- as.numeric(as.character(selection_frequency$crosstalk))
+  selection_frequency$selection_frequency <- selection_frequency$n_selected / nrep
+  best_se <- best$sd[[1]] / sqrt(nrep)
+  if (!is.finite(best_se)) best_se <- 0
+  cross$near_optimal <- cross$mean <= best$mean[[1]] + best_se
 
   list(
     best_crosstalk = best$crosstalk[[1]],
     best = best,
     summary = summary,
+    cross_block_summary = cross,
     raw = raw,
+    cross_block_by_replicate = cross_by_replicate,
+    selected_by_replicate = chosen_by_replicate,
+    selection_frequency = selection_frequency,
+    near_optimal = cross[cross$near_optimal, , drop = FALSE],
     dependence = dependence,
     cor.shrinkage = cor.shrinkage,
     module.count = module.count,
     module.between.shrinkage = module.between.shrinkage,
-    view.models = view.models
+    view.models = view.models,
+    provenance = list(
+      package_version = as.character(utils::packageVersion("MimeSys")),
+      created_at = format(Sys.time(), tz = "UTC", usetz = TRUE),
+      seed = seed,
+      crosstalk_grid = crosstalk_grid,
+      nsample = nsample,
+      nrep = nrep,
+      p = p,
+      max_features_per_view = max_features_per_view,
+      feature_select = feature.select,
+      feature_jitter = feature.jitter
+    )
   )
+}
+
+.mimesys_pcl_view_matrices <- function(pcl, feature_names = "template_feature") {
+  x <- t(as.matrix(pcl$feature_table))
+  feature_type <- as.character(pcl$feature_metadata$featureType)
+  idx <- split(seq_len(ncol(x)), feature_type)
+  lapply(idx, function(j) {
+    out <- x[, j, drop = FALSE]
+    feature_ids <- pcl$feature_metadata[[feature_names]][j]
+    if (!is.null(feature_ids) && !anyNA(feature_ids)) {
+      colnames(out) <- make.unique(as.character(feature_ids), sep = "_")
+    }
+    out
+  })
 }
 
 #' Plot crosstalk calibration distances

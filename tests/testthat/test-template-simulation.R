@@ -9,6 +9,8 @@ test_that("template simulator preserves requested structure", {
   rownames(template$mrna) <- rownames(template$protein) <- paste0("S", seq_len(n))
 
   tm <- fit_template(template, rank = 3, shared.rank = 1)
+  expect_equal(dim(tm$observed$mrna), dim(template$mrna))
+  expect_equal(dim(tm$observed$protein), dim(template$protein))
   sim <- gen_simmba(
     nsample = 80,
     template = tm,
@@ -24,6 +26,117 @@ test_that("template simulator preserves requested structure", {
   expect_equal(nrow(sim$trainDat[[1]]$feature_table), 40)
   expect_true("beta" %in% names(sim$trainDat[[1]]$feature_metadata))
   expect_true("Y" %in% names(sim$trainDat[[1]]$sample_metadata))
+})
+
+test_that("MAE-first simulation stores data and truth in Bioconductor containers", {
+  skip_if_not_installed("MultiAssayExperiment")
+  skip_if_not_installed("SummarizedExperiment")
+
+  set.seed(101)
+  n <- 50
+  sample_ids <- paste0("S", seq_len(n))
+  mrna <- matrix(stats::rnorm(n * 12), n, 12,
+                 dimnames = list(sample_ids, paste0("m", seq_len(12))))
+  protein <- matrix(stats::rnorm(n * 10), n, 10,
+                    dimnames = list(sample_ids, paste0("p", seq_len(10))))
+  input_mae <- MultiAssayExperiment::MultiAssayExperiment(
+    experiments = MultiAssayExperiment::ExperimentList(
+      mrna = SummarizedExperiment::SummarizedExperiment(assays = list(counts = t(mrna))),
+      protein = SummarizedExperiment::SummarizedExperiment(assays = list(counts = t(protein)))
+    )
+  )
+
+  sim_mae <- simulate_mimesys(
+    template = input_mae,
+    n = 60,
+    p = c(mrna = 8, protein = 8),
+    crosstalk = 0.5,
+    outcome = list(model = "shared_latent", shared_latent_function = "linear"),
+    template_args = list(rank = 3, shared.rank = 1),
+    nrep = 1,
+    seed = 102
+  )
+
+  expect_s4_class(sim_mae, "MultiAssayExperiment")
+  expect_setequal(names(MultiAssayExperiment::experiments(sim_mae)), c("mrna", "protein"))
+  expect_true(all(c("Y", "split") %in% colnames(MultiAssayExperiment::colData(sim_mae))))
+  expect_true("beta" %in% colnames(SummarizedExperiment::rowData(
+    MultiAssayExperiment::experiments(sim_mae)[["mrna"]]
+  )))
+  expect_true("simulation" %in% names(S4Vectors::metadata(sim_mae)))
+})
+
+test_that("MAE-first simulation returns a replicate collection when requested", {
+  skip_if_not_installed("MultiAssayExperiment")
+  set.seed(103)
+  template <- list(
+    mrna = matrix(stats::rnorm(50 * 10), 50, 10),
+    protein = matrix(stats::rnorm(50 * 10), 50, 10)
+  )
+  rownames(template$mrna) <- rownames(template$protein) <- paste0("S", seq_len(50))
+
+  sim <- simulate_mimesys(
+    template, n = 60, p = 8, crosstalk = 0.5, nrep = 2,
+    template_args = list(rank = 2, shared.rank = 1), seed = 104
+  )
+  expect_s3_class(sim, "mimesys_mae_simulation")
+  expect_length(sim$replicates, 2)
+  expect_s4_class(sim$replicates[[1]], "MultiAssayExperiment")
+})
+
+test_that("MAE-first defaults calibrate crosstalk and null output contains no outcome", {
+  skip_if_not_installed("MultiAssayExperiment")
+  set.seed(105)
+  n <- 45
+  latent <- stats::rnorm(n)
+  template <- list(
+    mrna = outer(latent, stats::rnorm(10)) + matrix(stats::rnorm(n * 10), n, 10),
+    protein = outer(latent, stats::rnorm(10)) + matrix(stats::rnorm(n * 10), n, 10)
+  )
+  rownames(template$mrna) <- rownames(template$protein) <- paste0("S", seq_len(n))
+  calibration <- list(grid = c(0, 0.5, 1), nrep = 1, max_features_per_view = 6)
+
+  null_mae <- simulate_mimesys_null(
+    template, n = 50, p = 8,
+    template_args = list(rank = 2, shared.rank = 1),
+    calibration = calibration, seed = 106
+  )
+  settings <- S4Vectors::metadata(null_mae)$simulation
+  expect_s4_class(null_mae, "MultiAssayExperiment")
+  expect_false("Y" %in% colnames(MultiAssayExperiment::colData(null_mae)))
+  expect_true(is.numeric(settings$crosstalk))
+  expect_true(is.list(settings$crosstalk_calibration))
+
+  outcome_mae <- simulate_mimesys(
+    template, n = 50, p = 8,
+    template_args = list(rank = 2, shared.rank = 1),
+    calibration = calibration, seed = 107
+  )
+  expect_true("Y" %in% colnames(MultiAssayExperiment::colData(outcome_mae)))
+  expect_true(is.list(S4Vectors::metadata(outcome_mae)$simulation$crosstalk_calibration))
+})
+
+test_that("named presets are discoverable and can be overridden", {
+  presets <- mimesys_presets()
+  expect_setequal(
+    presets$preset,
+    c("default", "linear", "friedman", "friedman2", "shared_latent",
+      "shared_latent_friedman", "shared_latent_friedman2")
+  )
+
+  set.seed(108)
+  template <- list(
+    mrna = matrix(stats::rnorm(50 * 10), 50, 10),
+    protein = matrix(stats::rnorm(50 * 10), 50, 10)
+  )
+  rownames(template$mrna) <- rownames(template$protein) <- paste0("S", seq_len(50))
+  sim_mae <- simulate_mimesys(
+    template, n = 60, p = 8, crosstalk = 0.5,
+    preset = "friedman",
+    outcome = list(model = "linear"),
+    template_args = list(rank = 2, shared.rank = 1), seed = 109
+  )
+  expect_equal(S4Vectors::metadata(sim_mae)$simulation$ygen.mode, "LM")
 })
 
 test_that("feature counts can be scalar, positional, or named by view", {
@@ -48,6 +161,25 @@ test_that("feature counts can be scalar, positional, or named by view", {
   expect_equal(stats::setNames(as.integer(positional_counts), names(positional_counts)), c(mrna = 5L, protein = 7L))
   expect_equal(stats::setNames(as.integer(named_counts), names(named_counts)), c(mrna = 8L, protein = 4L))
   expect_error(sim_from_template(tm, n = 30, p = c(mrna = 5)), "missing view")
+})
+
+test_that("cross-view reconstruction error is the matched correlation-block RMSE", {
+  observed <- list(
+    view_a = cbind(a1 = 1:8, a2 = c(1, 3, 2, 5, 4, 7, 6, 8)),
+    view_b = cbind(b1 = c(2, 1, 4, 3, 6, 5, 8, 7), b2 = c(8, 6, 7, 5, 4, 2, 3, 1))
+  )
+  simulated <- observed
+  simulated$view_b[, "b1"] <- rev(simulated$view_b[, "b1"])
+
+  result <- feature_correlation_frobenius(observed, simulated)
+  cross <- result[!result$diagonal_block, , drop = FALSE]
+  expected <- sqrt(mean((
+    stats::cor(observed$view_a, observed$view_b) -
+      stats::cor(simulated$view_a, simulated$view_b)
+  )^2))
+
+  expect_equal(nrow(cross), 1L)
+  expect_equal(cross$rescaled_frobenius, expected)
 })
 
 test_that("Friedman outcomes can control nonlinear signal allocation by view", {
@@ -409,4 +541,73 @@ test_that("blockwise feature-correlation diagnostics support matrices and simula
     color_limit = 0.5
   )
   expect_true(file.exists(path))
+})
+
+test_that("2logp rank, input validation, and template print are available", {
+  set.seed(71)
+  n <- 50
+  template <- list(
+    mrna = matrix(stats::rnorm(n * 12), n, 12),
+    protein = matrix(stats::rnorm(n * 10), n, 10)
+  )
+  rownames(template$mrna) <- rownames(template$protein) <- paste0("S", seq_len(n))
+
+  input_report <- validate_mimesys_input(template)
+  expect_equal(attr(input_report, "common_samples"), n)
+  expect_true(all(c("missing_values", "constant_features") %in% names(input_report)))
+
+  tm <- fit_template(template, rank = "2logp", shared.rank = 1)
+  expect_equal(tm$fits$mrna$rank, ceiling(2 * log(12)))
+  expect_equal(tm$provenance$rank_input, "2logp")
+  expect_output(print(tm), "MimeSys template")
+})
+
+test_that("calibration and validation reports retain uncertainty diagnostics", {
+  skip_if_not_installed("ggplot2")
+  set.seed(72)
+  n <- 45
+  shared <- stats::rnorm(n)
+  template <- list(
+    mrna = outer(shared, stats::rnorm(9)) + matrix(stats::rnorm(n * 9), n, 9),
+    protein = outer(shared, stats::rnorm(8)) + matrix(stats::rnorm(n * 8), n, 8)
+  )
+  rownames(template$mrna) <- rownames(template$protein) <- paste0("S", seq_len(n))
+  tm <- fit_template(template, rank = 2, shared.rank = 1)
+
+  calibration <- calibrate_crosstalk(
+    tm, crosstalk_grid = c(0, 0.5, 1), nsample = 40, nrep = 2,
+    p = 6, max_features_per_view = 5, seed = 73
+  )
+  expect_equal(sum(calibration$selection_frequency$selection_frequency), 1)
+  expect_gte(nrow(calibration$near_optimal), 1)
+  expect_true(is.list(calibration$provenance))
+
+  report <- validate_template(
+    tm, p = 6, nsample = 40, nrep = 1,
+    crosstalk_grid = c(0, 0.5), max_features_per_view = 5, seed = 74
+  )
+  expect_s3_class(report, "mimesys_template_validation")
+  expect_true(all(c("pearson", "rmse") %in% names(report$correlation_structure)))
+  expect_s3_class(plot_template_validation(report, "correlation_structure"), "ggplot")
+  expect_s3_class(plot_template_validation(report, "marginal"), "ggplot")
+  expect_output(print(report), "MimeSys template validation")
+})
+
+test_that("MAE simulations retain generation provenance", {
+  skip_if_not_installed("MultiAssayExperiment")
+  set.seed(75)
+  n <- 45
+  template <- list(
+    mrna = matrix(stats::rnorm(n * 8), n, 8),
+    protein = matrix(stats::rnorm(n * 8), n, 8)
+  )
+  rownames(template$mrna) <- rownames(template$protein) <- paste0("S", seq_len(n))
+
+  sim_mae <- simulate_mimesys(
+    template, n = 40, p = 6, crosstalk = 0.5,
+    template_args = list(rank = 2, shared.rank = 1), seed = 76
+  )
+  provenance <- S4Vectors::metadata(sim_mae)$simulation$provenance
+  expect_equal(provenance$selected_crosstalk, 0.5)
+  expect_true(all(c("package_version", "created_at", "template") %in% names(provenance)))
 })
