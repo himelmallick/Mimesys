@@ -1,822 +1,434 @@
 ---
-title: "MimeSys simulation workflow"
-output: rmarkdown::html_vignette
+title: "Simulating multi-omics data with MimeSys"
+author:
+- name: Nalin Arora
+  affiliation: Weill Cornell Medicine
+  email: naa4050@med.cornell.edu
+- name: Himel Mallick
+- name: Ziyu Liu
+package: MimeSys
+output:
+  BiocStyle::html_document:
+    toc_float: true
+abstract: >
+  MimeSys fits a template to an empirical multi-omics dataset and simulates
+  new datasets that keep each feature's distribution and the dependence within
+  and across omics views, while letting the analyst control sample size,
+  feature counts, cross-view dependence and the signal that drives an outcome.
+  This vignette walks through fitting a template, checking it against the
+  source data, simulating null and outcome data, and the main outcome
+  scenarios.
 vignette: >
-  %\VignetteIndexEntry{MimeSys simulation workflow}
+  %\VignetteIndexEntry{Simulating multi-omics data with MimeSys}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
 
-```{r setup, include = FALSE, purl=FALSE}
-knitr::opts_chunk$set(
-  collapse = TRUE,
-  comment = "#>",
-  eval = FALSE
-)
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 ```
 
-# Overview
+# Introduction
 
-MimeSys is a template-based simulator for multi-omics data generation and validation. The central idea is to learn a reusable template from an empirical multi-view dataset, then generate synthetic datasets that preserve the empirical marginal distributions and dependence structure while allowing the analyst to control sample size, feature count, crosstalk, spike-in signal, and outcome-generation mode.
+Methods for multi-omics integration are usually benchmarked on simulated
+data, but simple simulators (independent Gaussian features, a few planted
+factors) rarely look like real omics data. MimeSys starts from a real dataset
+instead. It learns a *template*:
 
-The recommended workflow has three parts:
+1. each feature's marginal distribution, as its empirical quantile function,
+   so skewness, bounds, ties and zero inflation carry over;
+2. within-view dependence, through a low-rank Gaussian copula factor model on
+   normal scores;
+3. cross-view dependence, through a shared latent space estimated by
+   generalized canonical correlation analysis, with the number of shared
+   factors chosen by permutation (parallel analysis).
 
-1. Fit a template with `fit_template()`.
-2. Generate simulated datasets with `simulate_mimesys()`.
-3. Validate the simulated data with correlation and diagnostic functions.
-
-This vignette focuses on the arguments used in the current API and how those arguments affect the simulated data.
+New datasets are drawn from the template at any sample size and feature
+count. A single *crosstalk* weight scales cross-view dependence: `0` gives
+independent views, `1` the template level. Outcomes (continuous, binary or
+survival) can be driven by linear, nonlinear, shared-latent or cross-view
+interaction signal, and the true signal features are recorded.
 
 # Installation
 
-Install MimeSys from GitHub with `pak`:
-
-```{r install, purl=FALSE}
-install.packages("pak")
-pak::pak("himelmallick/MimeSys")
+```{r install, eval = FALSE}
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+    install.packages("BiocManager")
+}
+BiocManager::install("MimeSys")
 ```
 
-Then load the package:
-
-```{r load, purl=FALSE}
+```{r load, message = FALSE}
 library(MimeSys)
-```
-
-For local development from the package source directory:
-
-```{r local-install, purl=FALSE}
-pak::local_install(".")
-
-# During active development, this is also useful:
-devtools::load_all(".")
-```
-
-# Input data: MultiAssayExperiment
-
-MimeSys is MAE-first. The recommended input is a `MultiAssayExperiment` with
-one `SummarizedExperiment` per omics view. Assays follow the Bioconductor
-convention: features in rows and samples in columns.
-
-```{r input-mae, purl=FALSE}
 library(MultiAssayExperiment)
-
-# `mae` contains experiments named Immunome, Metabolome, and Proteome.
-experiments(mae)
 ```
 
-MimeSys matches primary sample IDs across experiments before fitting and
-transposes assays internally for the simulation engine. Named lists of matrices
-remain supported for interoperability; those matrices use samples in rows and
-features in columns.
+# Example data
 
-View names are reused throughout the template and simulation metadata.
+MimeSys ships two small `MultiAssayExperiment` objects. `stelzer_mae` holds
+the CyTOF immunome, plasma metabolome and plasma proteome of 53 pregnant
+subjects (first timepoint, 40 features per view) from Stelzer et al. (2021).
+`franzosa_mae` holds gut microbiome species abundances and stool metabolites
+for 155 subjects from Franzosa et al. (2019).
 
-Before fitting, inspect the input container:
-
-```{r validate-input, purl=FALSE}
-input_report <- validate_mimesys_input(mae)
-input_report
-attr(input_report, "common_samples")
+```{r data}
+data(stelzer_mae)
+stelzer_mae
+validate_mimesys_input(stelzer_mae)
 ```
 
-The report gives the samples, features, missing values, and constant features
-in each view, plus the number of sample IDs shared by all views.
+`validate_mimesys_input()` reports samples, features, missing values and
+constant features per view, and the number of samples shared by all views.
+Samples are matched across views by sample ID (the column names of each
+experiment).
 
-# Step 1: Fit a template
+The template assumes **one sample per subject**. For repeated-measures data,
+fit the template on a single timepoint; treating repeated samples from the
+same subject as independent inflates the estimated cross-view structure. The
+example data already use the first timepoint only.
 
-The template stores the empirical structure used by the simulator.
+# Fitting a template
 
-```{r fit-template, purl=FALSE}
+```{r fit}
 template <- fit_template(
-  template = mae,
-  rank = NULL,
-  var.explained = 0.7,
-  max.rank = NULL,
-  shared.rank = NULL,
-  nperm = 50,
-  view.transform = NULL
+    stelzer_mae,
+    view.transform = c(Metabolomics = "log1p", Proteomics = "log1p"),
+    shared.rank = 3,
+    seed = 1
 )
+template
 ```
 
-## `template`
-
-`template` is normally an empirical `MultiAssayExperiment`.
-
-```{r template-argument, purl=FALSE}
-template <- fit_template(
-  template = mae
-)
-```
-
-If row names are available in all views, MimeSys keeps the intersection of matched samples. If row names are not available, all views must have the same number of rows.
-
-## `rank`
-
-`rank` controls the number of latent factors retained within each view.
-
-```{r fixed-rank, purl=FALSE}
-template <- fit_template(
-  views,
-  rank = 10
-)
-```
-
-Use a scalar to apply the same rank to all views. Use a vector to provide one rank per view.
-
-If `rank = NULL`, MimeSys chooses the within-view rank from `var.explained`, capped by `max.rank`.
-
-For a feature-count-aware fixed rule, use `rank = "2logp"`. This retains
-`ceiling(2 * log(p_m))` factors for view `m`, capped by `max.rank`.
-
-```{r rank-2logp, purl=FALSE}
-template <- fit_template(views, rank = "2logp")
-```
-
-## `var.explained`
-
-`var.explained` is used only when `rank = NULL`.
-
-```{r variance-explained, purl=FALSE}
-template <- fit_template(
-  views,
-  rank = NULL,
-  var.explained = 0.7
-)
-```
-
-This asks MimeSys to retain enough latent factors to explain approximately 70% of the normal-score variance in each view, subject to `max.rank`.
-
-## `max.rank`
-
-`max.rank` caps the number of within-view factors when `rank = NULL`.
-
-```{r max-rank, purl=FALSE}
-template <- fit_template(
-  views,
-  rank = NULL,
-  var.explained = 0.8,
-  max.rank = 20
-)
-```
-
-If `max.rank = NULL`, MimeSys uses a default based on the empirical sample size.
-
-## `shared.rank`
-
-`shared.rank` controls the number of shared latent factors across views.
-
-```{r shared-rank, purl=FALSE}
-template <- fit_template(
-  views,
-  rank = 10,
-  shared.rank = 3
-)
-```
-
-If `shared.rank = NULL`, MimeSys estimates the shared rank using permutation-based parallel analysis. This guards against treating finite-sample noise as true cross-view structure.
-
-## `nperm`
-
-`nperm` controls the number of permutations used when `shared.rank = NULL`.
-
-```{r nperm, purl=FALSE}
-template <- fit_template(
-  views,
-  shared.rank = NULL,
-  nperm = 100
-)
-```
-
-Larger values give a more stable null threshold but take longer.
-
-## `view.transform`
-
-`view.transform` controls preprocessing before template fitting.
-
-Supported values are:
-
-- `"none"`: no transformation.
-- `"log1p"` or `"log"`: log-one-plus transformation.
-- `"clr"`: centered log-ratio transformation for non-negative compositional data.
-- `NULL`: equivalent to `"none"` for all views.
-
-Use one transform for all views:
-
-```{r one-transform, purl=FALSE}
-template <- fit_template(
-  views,
-  view.transform = "log1p"
-)
-```
-
-Or use a named vector by view:
-
-```{r named-transform, purl=FALSE}
-template <- fit_template(
-  views,
-  view.transform = c(
-    Microbiome = "clr",
-    Metabolome = "log1p",
-    Proteome = "none"
-  )
-)
-```
-
-# Step 2: Generate simulations
-
-Use `simulate_mimesys()` for outcome-based simulation. It performs four operations:
-
-1. Generate null multi-view features from the template.
-2. Spike feature effects.
-3. Generate outcomes.
-4. Split each replicate into training and test data.
-
-```{r simulate-mimesys, purl=FALSE}
-sim_mae <- simulate_mimesys(
-  template = template,
-  n = 200,
-  p = c(Immunome = 200, Metabolome = 200, Proteome = 200),
-  outcome = "linear",
-  seed = 1
-)
-
-colData(sim_mae)[, c("Y", "split")]
-rowData(experiments(sim_mae)[["Proteome"]])
-```
-
-When `nrep = 1`, `simulate_mimesys()` returns a `MultiAssayExperiment`.
-Simulated values are in the `"simulated"` assay of each experiment, outcomes
-and split labels are in `colData()`, feature-level spike-in truth is in
-`rowData()`, and settings plus latent truth are in `metadata(sim_mae)`.
-
-By default, `simulate_mimesys()` calibrates crosstalk using only simulated null
-data. It chooses the candidate value that best reconstructs empirical
-cross-view correlation blocks, then reuses that selected value for the final
-outcome simulation. The full calibration result is stored in
-`metadata(sim_mae)$simulation$crosstalk_calibration`.
-By default, calibration uses the original template sample size and every
-matched empirical feature; optional `calibration` settings can reduce either
-for faster exploratory runs.
-
-When an outcome is not needed, use `simulate_mimesys_null()`:
-
-```{r simulate-null-mae, purl=FALSE}
-null_mae <- simulate_mimesys_null(template, n = 200, p = 200, seed = 1)
-metadata(null_mae)$simulation$crosstalk
-```
-
-Use the compact `outcome`, `signal`, and `null_model` lists only when changing
-defaults. `gen_simmba()` remains the advanced interface for users who need
-every underlying simulation control.
-
-Built-in presets cover the standard outcome settings:
-
-```{r presets, purl=FALSE}
-mimesys_presets()
-
-sim_mae <- simulate_mimesys(
-  template, n = 200, p = 200,
-  preset = "shared_latent_friedman2",
-  outcome = list(shared_latent_n_factors = 5),
-  seed = 1
-)
-```
-
-Explicit values in `outcome`, `signal`, and `null_model` override a preset.
-
-## `nsample`
-
-`nsample` is the number of samples simulated in each replicate before train/test splitting.
-
-```{r nsample, purl=FALSE}
-sim <- gen_simmba(
-  nsample = 500,
-  template = template
-)
-```
-
-Varying `nsample` is useful for checking whether downstream results become more stable with larger sample sizes.
-
-## `template`
-
-`template` can be either a fitted `mimesys_template` or a raw named list of empirical matrices.
-
-Recommended:
-
-```{r fitted-template, purl=FALSE}
-template <- fit_template(views, rank = 10)
-sim <- gen_simmba(nsample = 200, template = template)
-```
-
-If a raw list is supplied, `gen_simmba()` calls `fit_template()` internally and passes additional arguments through `...`.
-
-## `p`
-
-`p` controls the number of simulated features per view.
-
-Use a scalar for the same number of features per view:
-
-```{r p-scalar, purl=FALSE}
-sim <- gen_simmba(
-  nsample = 200,
-  template = template,
-  p = 200
-)
-```
-
-Use a named vector for view-specific feature counts:
-
-```{r p-named, purl=FALSE}
-sim <- gen_simmba(
-  nsample = 200,
-  template = template,
-  p = c(Immunome = 100, Metabolome = 200, Proteome = 500)
-)
-```
-
-Use `p = NULL` to keep the template feature counts.
-
-## `crosstalk`
-
-`crosstalk` controls how strongly views share latent structure during null feature generation.
-
-```{r crosstalk, purl=FALSE}
-sim <- gen_simmba(
-  nsample = 200,
-  template = template,
-  crosstalk = 0.5
-)
-```
-
-Interpretation:
-
-- `crosstalk = 0` makes views independent conditional on their own within-view structure.
-- `crosstalk = 1` uses the template-level shared structure.
-- Values above 1 can amplify the learned shared structure up to `crosstalk_max(template)`.
-
-Crosstalk is not the same as downstream performance gain. High crosstalk creates more cross-view correlation, but the outcome signal can become redundant across views. Downstream behavior depends on the interaction between `crosstalk`, `signal.share`, `de.align`, and `ygen.mode`.
-
-## `feature.select`
-
-`feature.select` controls which template features are used when `p` is smaller than the number of empirical features.
-
-Options:
-
-- `"random"`: randomly sample template features.
-- `"variance"`: choose high-variance template features.
-
-## `feature.jitter`
-
-`feature.jitter` controls how offspring features are created when `p` is larger than the empirical feature count.
-
-Values near 0 make offspring features closer to their parent features. Larger values create more perturbation.
-
-## `dependence`
-
-`dependence` controls the null dependence simulator.
-
-Options:
-
-- `"factor"`: low-rank factor simulator.
-- `"empirical_copula"`: empirical latent feature correlation simulator.
-- `"module_copula"`: module-smoothed empirical copula simulator.
-
-The choice is applied before outcome generation. It changes the null feature structure, not the outcome model directly.
-
-## `cor.shrinkage`
-
-`cor.shrinkage` shrinks the latent correlation matrix toward independence for the copula-based dependence modes.
-
-```{r cor-shrinkage, purl=FALSE}
-sim <- gen_simmba(
-  nsample = 200,
-  template = template,
-  dependence = "empirical_copula",
-  cor.shrinkage = 0.1
-)
-```
-
-## `module.count` and `module.between.shrinkage`
-
-These arguments are used when `dependence = "module_copula"`.
-
-`module.count` controls the number of within-view feature modules. If `NULL`, MimeSys uses a data-adaptive default.
-
-`module.between.shrinkage` controls how strongly correlations between modules are smoothed.
-
-## `view.models`
-
-`view.models` controls the observation model for each view.
-
-Supported models:
-
-- `"continuous"`: empirical-quantile emission.
-- `"two_part_copula"`: two-stage sparse emission for microbiome-like data.
-
-Example:
-
-```{r view-models, purl=FALSE}
-sim <- gen_simmba(
-  nsample = 200,
-  template = template,
-  view.models = c(
-    Microbiome = "two_part_copula",
-    Metabolome = "continuous"
-  )
-)
-```
-
-Unspecified views use `"continuous"`.
-
-## `snr`
-
-`snr` is the signal-to-noise ratio for continuous outcomes.
-
-```{r snr, purl=FALSE}
-sim_easy <- gen_simmba(nsample = 200, template = template, snr = 2)
-sim_hard <- gen_simmba(nsample = 200, template = template, snr = 0.5)
-```
-
-Higher `snr` creates easier prediction tasks.
-
-## `p.train`
-
-`p.train` controls the train/test split.
-
-```{r train-split, purl=FALSE}
-sim <- gen_simmba(
-  nsample = 200,
-  template = template,
-  p.train = 0.8
-)
-```
-
-With `p.train = 0.8`, 80% of samples go into training and 20% go into testing.
-
-## Differential-effect arguments
-
-The following arguments control how feature-level spike-in coefficients are created:
-
-- `de.prob`: probability a feature receives a nonzero coefficient.
-- `de.downProb`: probability a nonzero coefficient is negative.
-- `de.facLoc`: log-normal effect-size location.
-- `de.facScale`: log-normal effect-size scale.
-- `de.align`: whether nonzero effects are aligned with the shared cross-view direction.
-
-Example:
-
-```{r de-args, purl=FALSE}
-sim <- gen_simmba(
-  nsample = 200,
-  template = template,
-  de.prob = 0.05,
-  de.downProb = 0.5,
-  de.facLoc = 1,
-  de.facScale = 0.4,
-  de.align = 1
-)
-```
-
-`de.align = NULL` uses independent spike-in positions and signs. Numeric values between 0 and 1 place that fraction of differential features on features that load strongly on the shared cross-view direction.
-
-## `signal.share`
-
-`signal.share` controls the relative outcome-signal contribution of each view.
-
-Balanced signal:
-
-```{r balanced-signal, purl=FALSE}
-signal.share = c(Immunome = 1, Metabolome = 1, Proteome = 1)
-```
-
-Single-layer signal:
-
-```{r single-layer-signal, purl=FALSE}
-signal.share = c(Immunome = 1, Metabolome = 0, Proteome = 0)
-```
-
-The vector is normalized internally, so `c(1, 1, 1)` means equal contribution from each view.
-
-## `friedman.share`
-
-`friedman.share` controls which views provide the five features used by the Friedman and Friedman2 nonlinear outcome modes.
-
-```{r friedman-share, purl=FALSE}
-sim <- gen_simmba(
-  nsample = 200,
-  template = template,
-  ygen.mode = "Friedman",
-  friedman.share = c(Immunome = 1, Metabolome = 1, Proteome = 1)
-)
-```
-
-If `friedman.share = NULL`, MimeSys uses `signal.share` when available. Otherwise, Friedman features are sampled uniformly from the nonzero spiked features.
-
-## `ygen.mode`
-
-`ygen.mode` controls how the latent outcome score is generated.
-
-### `LM`
-
-`"LM"` creates an additive linear outcome:
-
-$$
-\eta = \sum_m X_m \beta_m.
-$$
-
-If `signal.share` is supplied, the view-specific predictors are rescaled so their marginal variance contributions match the requested shares.
-
-### `Friedman`
-
-`"Friedman"` uses a nonlinear Friedman-style outcome based on five selected features:
-
-$$
-\eta =
-10\sin(\pi x_1 x_2) +
-20(x_3 - 0.5)^2 +
-10x_4 +
-5x_5.
-$$
-
-Selected features are rank-transformed to the unit interval before applying the formula.
-
-### `Friedman2`
-
-`"Friedman2"` combines additive and nonlinear signal:
-
-$$
-\eta = \eta_{\mathrm{linear}} + \eta_{\mathrm{Friedman}}.
-$$
-
-### `SharedLatent`
-
-`"SharedLatent"` generates the outcome from the shared latent factors:
-
-$$
-\eta =
-\frac{\sum_{\ell=1}^{r} \mathrm{scale}(S_{\ell})}{\sqrt{r}},
-$$
-
-where \(S\) is the simulated shared latent factor matrix and \(r\) is the number of shared factors.
-
-This mode uses all available shared factors, not just the first factor.
-
-The shared-latent outcome can also be controlled at the latent-factor level:
-
-```{r shared-latent-functions, purl=FALSE}
-sim <- gen_simmba(
-  nsample = 200,
-  template = template,
-  ygen.mode = "SharedLatent",
-  shared.latent.fun = "friedman2",
-  shared.latent.n_factors = 5
-)
-```
-
-`shared.latent.fun = "linear"` is the default and preserves the equal-weight linear score above. `shared.latent.fun = "friedman"` applies a nonlinear Friedman response to the first five selected shared factors after rank-transforming them to \([0, 1]\). `shared.latent.fun = "friedman2"` adds the linear shared-latent score and the nonlinear Friedman component. The nonlinear functions require at least five selected shared latent factors, so use `fit_template(..., shared.rank = 5)` or larger when you want these modes.
-
-## `outcome.type`
-
-`outcome.type` controls the observed outcome.
-
-Options:
-
-- `"continuous"`: stores outcome in `sample_metadata$Y`.
-- `"binary"`: samples a binary outcome from `plogis(eta)` and stores it in `sample_metadata$Y`.
-- `"survival"`: stores `time` and `status` in `sample_metadata`.
-
-Survival-specific arguments:
-
-- `surv.hscale`: multiplicative hazard scale.
-- `cens.lower`: lower bound for uniform censoring time.
-- `cens.upper`: upper bound for uniform censoring time.
-
-## `nrep` and `seed`
-
-`nrep` controls the number of simulation replicates. `seed` controls reproducibility.
-
-```{r nrep-seed, purl=FALSE}
-sim <- gen_simmba(
-  nsample = 200,
-  template = template,
-  nrep = 50,
-  seed = 1
-)
-```
-
-# Step 3: Inspect the simulation
-
-The output from `gen_simmba()` contains train and test data for each replicate.
-
-```{r inspect, purl=FALSE}
-names(sim)
-sim$trainDat[[1]]
-sim$testDat[[1]]
-```
-
-Each train/test object is PCL-style:
-
-- `feature_table`: features by samples.
-- `sample_metadata`: sample-level metadata.
-- `feature_metadata`: feature-level metadata.
-- `truth`: latent truth objects.
-
-Use `simulation_view_matrices()` to recover sample-by-feature matrices split by view:
-
-```{r view-matrices, purl=FALSE}
-train_views <- simulation_view_matrices(
-  sim,
-  rep = 1,
-  split = "train",
-  feature_names = "featureID"
-)
-
-names(train_views)
-dim(train_views$Immunome)
-```
-
-Extract outcomes:
-
-```{r outcomes, purl=FALSE}
-y_train <- sim$trainDat[[1]]$sample_metadata$Y
-y_test  <- sim$testDat[[1]]$sample_metadata$Y
-```
-
-Summarize the simulation:
-
-```{r summarize, purl=FALSE}
-summarize_simulation(sim)
-```
-
-# Lower-level null simulation
-
-Use `sim_from_template()` when you only need synthetic features and do not need outcomes.
-
-```{r null-simulation, purl=FALSE}
-pcl <- sim_from_template(
-  tmpl = template,
-  n = 200,
-  p = 200,
-  crosstalk = 0.5,
-  feature.select = "random",
-  feature.jitter = 0.2,
-  dependence = "factor",
-  view.models = NULL
-)
-```
-
-The output is one PCL-style object with features, metadata, and latent truth. It does not include train/test splits or outcomes.
-
-# Crosstalk calibration
-
-Use `calibrate_crosstalk()` to evaluate how well candidate crosstalk values reconstruct the empirical cross-view correlation structure.
-
-```{r calibrate, purl=FALSE}
-cal <- calibrate_crosstalk(
-  template = template,
-  crosstalk_grid = c(0, 0.1, 0.25, 0.5, 0.75, 0.9, 1),
-  nsample = 200,
-  nrep = 10,
-  p = 200,
-  seed = 1
-)
-
-cal$best_crosstalk
-plot_crosstalk_calibration(cal)
-```
-
-The calibration objective is not predictive performance. It evaluates how closely simulated and empirical feature-correlation blocks match. Lower distance means better reconstruction of the empirical correlation structure.
-
-The result also records calibration uncertainty. `cal$selection_frequency` is
-the fraction of null replicates selecting each candidate crosstalk value, while
-`cal$near_optimal` lists candidate values within one standard error of the
-lowest mean cross-block distance.
-
-# Template validation report
-
-Run `validate_template()` once before a simulation study to collect the main
-structural diagnostics in one object:
-
-```{r template-validation, purl=FALSE}
-report <- validate_template(
-  template,
-  p = 200,
-  nrep = 10,
-  crosstalk_grid = seq(0, 1, by = 0.1),
-  seed = 1
-)
-
+Here `shared.rank` is fixed at 3 to keep the example simple. With
+`shared.rank = NULL` (the default), the shared rank is chosen by sequential
+parallel analysis: the largest GCCA eigenvalue is compared with the
+distribution of the largest eigenvalue after permuting samples within views;
+if it is significant, that shared direction is removed from every view and the
+test is repeated. The per-step permutation p-values are stored in
+`template$gcca.pvalue`, and a warning flags a borderline choice. Setting
+`shared.rank.runs` above 1 (for example 20) repeats the choice with fresh
+permutations and uses the rounded mean (stability selection; the runs are
+stored in `template$shared.rank.selection`). `seed` (default 1234 in every
+MimeSys function) makes the fit reproducible.
+
+The main arguments are:
+
+- `rank`: factors per view. `NULL` (default) keeps enough factors to explain
+  `var.explained` (default 0.7) of the normal-score variance, capped at
+  `max.rank` (default a third of the sample size); `"2logp"` uses
+  `ceiling(2 * log(p))`.
+- `shared.rank`: number of shared cross-view factors. `NULL` chooses it by
+  parallel analysis with `nperm` permutations.
+- `view.transform`: per-view `"log1p"` or `"clr"` before fitting. Simulated
+  data can be mapped back to the original scale (see below).
+
+The fitted template stores the matrices it was fitted on and each feature's
+sorted values. Treat it with the same care as the source data.
+
+# Checking the template against the data
+
+`validate_template()` calibrates crosstalk on null simulations, simulates a
+dataset at the selected value and compares it with the template data.
+
+```{r validate}
+grid <- seq(0, crosstalk_max(template), length.out = 6)
+report <- validate_template(template, nrep = 3, crosstalk_grid = grid, seed = 1)
 report
-plot_template_validation(report, "calibration")
-plot_template_validation(report, "correlation_structure")
-plot_template_validation(report, "marginal")
+report$correlation_structure
+report$marginal_diagnostics
 ```
 
-The report contains the selected crosstalk value, the cross-view reconstruction
-RMSE, correlation-pattern preservation for each view-pair block, and marginal
-quantile RMSE for each view. Template, calibration, and simulation metadata
-retain the package version, timestamp, seed, selected crosstalk, and template
-settings for reproducibility.
+`correlation_structure` correlates the observed and simulated feature-feature
+correlations within each block (values near 1 mean the pattern is kept).
+`marginal_diagnostics` gives per-view Kolmogorov-Smirnov distances and
+SD-scaled quantile errors, which are comparable across views.
 
-# Microbiome two-stage emission
+```{r validate-plots, fig.width = 6, fig.height = 4}
+plot_template_validation(report, type = "calibration")
+plot_template_validation(report, type = "correlation_structure")
+```
 
-For sparse microbiome-like data, use:
+# Calibrating crosstalk
 
-```{r microbiome-emission, purl=FALSE}
-sim <- gen_simmba(
-  nsample = 200,
-  template = template,
-  view.models = c(Microbiome = "two_part_copula")
+Crosstalk `1` reproduces the template's estimated shared structure, which can
+overstate the real cross-view correlation when the template is small.
+`calibrate_crosstalk()` picks the value whose null simulations best match the
+empirical cross-view correlation blocks.
+
+```{r calibrate}
+crosstalk_max(template)
+cal <- calibrate_crosstalk(template, crosstalk_grid = grid, nrep = 3, seed = 1)
+cal$best_crosstalk
+cal$selection_frequency
+cal$near_optimal[, c("crosstalk", "mean")]
+```
+
+`selection_frequency` and `near_optimal` show how decisive the choice is. A
+flat calibration curve means the data constrain crosstalk only loosely.
+Values above 1 amplify the template's shared structure, up to
+`crosstalk_max(template)`; grid values beyond that limit are dropped with a
+warning.
+
+# Simulating data
+
+## Null data
+
+```{r null}
+null_mae <- simulate_mimesys_null(
+    template,
+    n = 100,
+    p = 30,
+    crosstalk = cal$best_crosstalk
+)
+null_mae
+```
+
+`p` sets the number of features per view (a single value, one per view, or a
+named vector). Fewer features than the template subsamples them; more adds
+"offspring" features that copy a parent's marginal with perturbed loadings.
+Views fitted with a transform are returned on the fitted (transformed) scale
+by default; `null_model = list(back_transform = TRUE)` returns the original
+measurement scale:
+
+```{r null-scale}
+metab_rows <- rowData(experiments(null_mae)[["Metabolomics"]])
+head(metab_rows[, c("scale", "transform")])
+summary(as.vector(assay(experiments(null_mae)[["Metabolomics"]])))
+orig_mae <- simulate_mimesys_null(
+    template, n = 100, p = 30, crosstalk = cal$best_crosstalk,
+    null_model = list(back_transform = TRUE)
+)
+summary(as.vector(assay(experiments(orig_mae)[["Metabolomics"]])))
+```
+
+## Outcome data
+
+`simulate_mimesys()` adds spiked signal and an outcome, and labels each sample
+as training or test.
+
+```{r outcome}
+sim_mae <- simulate_mimesys(
+    template,
+    n = 200,
+    p = 30,
+    crosstalk = cal$best_crosstalk,
+    outcome = list(type = "binary", prevalence = 0.3),
+    signal = list(share = c(1, 1, 1), de_prob = 0.2),
+    seed = 1
+)
+table(sim_mae$Y, sim_mae$split)
+```
+
+Outcomes and split labels are in `colData()`, simulated values in the
+`"simulated"` assay, feature-level truth in `rowData()` and settings in
+`metadata()`. The ground truth for which features drive the outcome is
+`outcome_feature`:
+
+```{r truth}
+rd <- rowData(experiments(sim_mae)[["Proteomics"]])
+head(rd[rd$outcome_feature, c("template_feature", "beta")])
+```
+
+For binary and survival outcomes `snr` is the signal-to-noise ratio on the
+latent scale, `prevalence` sets the case proportion and `cens_rate` the
+censoring proportion. `signal$share` balances the signal across views.
+
+# Outcome scenarios
+
+Presets cover the standard scenarios:
+
+```{r presets}
+mimesys_presets()[, c("preset", "outcome_model", "description")]
+```
+
+The lower-level `gen_simmba()` returns lists of training and test replicates
+and exposes every control. Features are standardized before any outcome is
+computed.
+
+```{r scenarios}
+run <- function(...) {
+    gen_simmba(
+        nsample = 200, template = template, p = 30,
+        crosstalk = cal$best_crosstalk, de.prob = 0.2, nrep = 1, seed = 2, ...
+    )
+}
+sims <- list(
+    linear = run(ygen.mode = "LM", signal.share = c(1, 1, 1)),
+    friedman2 = run(ygen.mode = "Friedman2", nonlinear.weight = 0.5),
+    shared = run(ygen.mode = "SharedLatent"),
+    interaction = run(ygen.mode = "Interaction", interaction.weight = 1)
+)
+vapply(sims, function(s) {
+    sum(s$trainDat$Rep_1$feature_metadata$outcome_feature)
+}, integer(1))
+```
+
+- **Linear** (`"LM"`): additive per-view effects; `signal.share` sets each
+  view's share of signal variance.
+- **Nonlinear** (`"Friedman"`, `"Friedman2"`): the Friedman function of five
+  spiked features, alone or mixed with the linear part by `nonlinear.weight`.
+- **Shared latent** (`"SharedLatent"`): the outcome depends on the shared
+  cross-view factors, not on individual features, so no feature is marked in
+  `outcome_feature`.
+- **Cross-view interaction** (`"Interaction"`): products of feature pairs
+  from different views. With `interaction.weight = 1` there are no main
+  effects, so only methods that model views jointly can recover the signal.
+
+```{r interaction-pairs}
+sims$interaction$trainDat$Rep_1$truth$interaction_pairs
+```
+
+`simulation_view_matrices()` returns sample-by-feature matrices per view:
+
+```{r view-matrices}
+train_views <- simulation_view_matrices(sims$linear, split = "train")
+vapply(train_views, dim, integer(2))
+```
+
+# Sparse microbiome data
+
+For sparse microbiome views, the two-part model draws presence from each
+species' zero probability and, given presence, abundance from its positive
+values. It is meant for sparse non-negative abundances only, so fit the
+microbiome view on its raw scale (MimeSys stops if a two-part view has negative
+values or was fitted on the CLR scale). For a simulation study, fix
+`shared.rank` once you have settled on a value.
+
+```{r microbiome}
+data(franzosa_mae)
+micro_template <- fit_template(
+    franzosa_mae,
+    view.transform = c(Metabolome = "log1p"),
+    seed = 1
+)
+micro_mae <- simulate_mimesys_null(
+    micro_template,
+    n = 300,
+    crosstalk = 1,
+    null_model = list(view_models = c(Microbiome = "two_part_copula"))
+)
+sim_micro <- assay(experiments(micro_mae)[["Microbiome"]])
+obs_micro <- assay(experiments(franzosa_mae)[["Microbiome"]])
+c(
+    observed_zero_fraction = mean(obs_micro == 0),
+    simulated_zero_fraction = mean(sim_micro == 0)
 )
 ```
 
-The two-stage model separates:
+# Mediation
 
-1. Presence or absence of a feature.
-2. Positive abundance conditional on presence.
+`gen_mediation()` and `simulate_mediation()` simulate an exposure, mediators
+in one or more views, and an outcome, for benchmarking (multi-view) mediation
+methods. Any view and any feature can be a mediator.
 
-For feature \(j\) in sample \(i\):
+- The exposure `T` is binary or continuous.
+- For each mediator, the template's latent normal score is mixed with the
+  standardized exposure, `Z_j <- a_j T* + sqrt(1 - a_j^2) Z_j` (mapped back
+  to an exact standard normal for a binary exposure), before it is mapped
+  through the feature's empirical quantiles, so mediators keep their template
+  distribution while the exposure shifts them.
+- The outcome is `Y = DE * T + sum_j b_j M~_j (+ mediator interactions) + noise`,
+  with `M~_j` the standardized mediators.
+- The b-paths are calibrated so that the population natural indirect effect
+  equals `TIE`; the true NIE, NDE and TE, the indirect effect carried by each
+  view, and each mediator's paths are returned as truth.
+- `effect.type = "null_a"`, `"null_b"` or `"null_ab"` give null scenarios
+  with zero indirect effect.
+- `outcome.type = "binary"` gives a logistic outcome: `TIE` and `DE` are
+  conditional effects on the log-odds (linear-predictor) scale, the intercept
+  is solved for `outcome.prevalence`, and the natural effects (risk
+  differences, odds ratios, log odds ratios) are reported in
+  `truth$mediation$binary`.
+- `exposure_effect` in the feature metadata gives the true exposure effect on
+  every feature; in closed compositional views it is non-zero for
+  non-mediators too, because renormalization passes the shift on.
+- The truth refers to the fitted (transformed) scale, which is the scale the
+  features are returned on by default.
 
-$$
-Z_{ij} \sim \mathrm{Bernoulli}(\pi_{ij}),
-$$
-
-and
-
-$$
-X_{ij} = Z_{ij} A_{ij},
-$$
-
-where \(A_{ij}\) is the positive abundance draw. This helps preserve sparsity and zero inflation while still allowing cross-view dependence through the simulator.
-
-# Recommended outcome-generation scenarios
-
-## Single-layer signal
-
-```{r scenario-single, purl=FALSE}
-sim_single <- gen_simmba(
-  nsample = 200,
-  template = template,
-  signal.share = c(Immunome = 1, Metabolome = 0, Proteome = 0),
-  ygen.mode = "LM"
+```{r mediation}
+med <- gen_mediation(
+    nsample = 1000,
+    template = template,
+    p = 30,
+    n.mediators = c(CYTOF = 3, Metabolomics = 3, Proteomics = 0),
+    TIE = 1,
+    DE = 0.5,
+    n.mc = 2000,
+    seed = 1
 )
+truth <- med$replicates$Rep_1$truth$mediation
+unlist(truth[c("NIE", "NDE", "TE")])
+truth$NIE_by_view
+fm <- med$replicates$Rep_1$feature_metadata
+head(fm[fm$mediator, c("featureType", "a_path", "a_effect", "b_path", "indirect")])
 ```
 
-Expected behavior: only the selected layer carries the spiked outcome signal.
+A standard product-of-coefficients analysis with the true mediators
+recovers the planted effects:
 
-## Balanced additive signal
-
-```{r scenario-balanced, purl=FALSE}
-sim_balanced <- gen_simmba(
-  nsample = 200,
-  template = template,
-  signal.share = c(Immunome = 1, Metabolome = 1, Proteome = 1),
-  ygen.mode = "LM",
-  de.align = 1
-)
+```{r mediation-check}
+r <- med$replicates$Rep_1
+x <- t(as.matrix(r$feature_table))
+mediators <- scale(x[, r$feature_metadata$mediator])
+exposure <- r$sample_metadata$exposure
+a_hat <- apply(mediators, 2, function(m) coef(lm(m ~ exposure))[2])
+fit_y <- lm(r$sample_metadata$Y ~ exposure + mediators)
+c(NIE_hat = sum(a_hat * coef(fit_y)[-(1:2)]), DE_hat = unname(coef(fit_y)[2]))
 ```
 
-Expected behavior: the spiked outcome signal is distributed across layers.
+`simulate_mediation()` returns the same simulation as a
+`MultiAssayExperiment`, with `exposure` and `Y` in `colData()`, the mediator
+truth in `rowData()` and the effects in `metadata(x)$truth$mediation`.
 
-## Shared-latent signal
+## Sequential mediation
 
-```{r scenario-shared, purl=FALSE}
-sim_shared <- gen_simmba(
-  nsample = 200,
-  template = template,
-  ygen.mode = "SharedLatent",
-  crosstalk = 0.75
+With `stages`, mediators are grouped into ordered stages of views, and each
+mediator of a later stage is linked to mediators of the previous one (many
+to many). The truth splits the indirect effect into natural path-specific
+effects and lists the links between mediators:
+
+```{r sequential-mediation}
+seq_med <- gen_mediation(
+    nsample = 500,
+    template = template,
+    p = 30,
+    n.mediators = c(CYTOF = 3, Metabolomics = 3, Proteomics = 0),
+    stages = list(Immune = "CYTOF", Metabolic = "Metabolomics"),
+    stage.links = list(type = "random", density = 0.5, strength = 0.3),
+    TIE = 1,
+    DE = 0.5,
+    n.mc = 2000,
+    seed = 1
 )
+seq_truth <- seq_med$replicates$Rep_1$truth$mediation
+seq_truth$path_effects
+seq_truth$links[, c("parent", "child", "coefficient")]
 ```
 
-Expected behavior: the outcome is driven by shared cross-view structure.
-
-## Nonlinear signal
-
-```{r scenario-friedman, purl=FALSE}
-sim_friedman <- gen_simmba(
-  nsample = 200,
-  template = template,
-  ygen.mode = "Friedman",
-  friedman.share = c(Immunome = 1, Metabolome = 1, Proteome = 1)
-)
-
-sim_friedman2 <- gen_simmba(
-  nsample = 200,
-  template = template,
-  ygen.mode = "Friedman2",
-  signal.share = c(Immunome = 1, Metabolome = 1, Proteome = 1)
-)
-```
-
-Expected behavior: nonlinear learners may gain an advantage over purely linear learners.
+`stage.links$strength = 0` keeps the stages but removes the links (a null for
+the link, with the views still correlated through crosstalk), and
+`stage.direct = c(1, 0)` with `stage.share = c(0, 1)` gives a pure chain.
 
 # Interpretation notes
 
-Crosstalk is a feature-generation parameter. It controls cross-view dependence in the simulated omics layers.
+Crosstalk controls cross-view dependence among the simulated features. Signal
+sharing controls how much outcome signal each view carries, and `de.align`
+controls whether spiked effects follow the shared cross-view direction. These
+are related but not interchangeable: high crosstalk can make views redundant,
+and the benefit of integration is largest when the signal is spread so that
+views are complementary or interact.
 
-Signal sharing is an outcome-generation parameter. It controls how much predictive signal is assigned to each layer.
+# References
 
-Differential-effect alignment controls whether spiked effects are placed along shared cross-view directions.
+Franzosa EA, et al. (2019). Gut microbiome structure and metabolic activity in
+inflammatory bowel disease. *Nature Microbiology* 4:293-305.
 
-These three ideas are related, but they are not interchangeable. High crosstalk can create redundant views. Fusion advantage is strongest when the outcome signal is distributed in a way that makes the views complementary or jointly informative.
+Stelzer IA, et al. (2021). Integrated trajectories of the maternal metabolome,
+proteome, and immunome predict labor onset. *Science Translational Medicine*
+13:eabd9898.
+
+# Session information
+
+```{r session-info}
+sessionInfo()
+```

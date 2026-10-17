@@ -10,13 +10,16 @@ fit_template(
   var.explained = 0.7,
   max.rank = NULL,
   shared.rank = NULL,
-  nperm = 50,
-  view.transform = NULL
+  nperm = 200,
+  view.transform = NULL,
+  seed = 1234,
+  shared.rank.runs = 1
 )
 }
 \arguments{
 \item{template}{Named list of numeric matrices, samples in rows and features
-in columns. Rows are matched by rownames when present, otherwise by position.}
+in columns. Rows are matched by rownames when present, otherwise by
+position.}
 
 \item{rank}{Optional factors per view (scalar or one per view). Use
 \code{"2logp"} to retain \code{ceiling(2 * log(p_m))} factors in view
@@ -26,21 +29,53 @@ in columns. Rows are matched by rownames when present, otherwise by position.}
 
 \item{var.explained}{Target variance fraction when \code{rank} is NULL.}
 
-\item{max.rank}{Cap on the per-view rank (default floor(n0 / 3)).}
+\item{max.rank}{Cap on the per-view rank (default floor(n0 / 3)). The cap
+also applies to an explicit \code{rank}.}
 
-\item{shared.rank}{Number of shared variates r. If NULL, chosen by parallel
-analysis: generalized CCA eigenvalues above the 95th percentile of those
-obtained after permuting samples independently within each view. This
-filters out the spurious cross-correlation a small template always shows.}
+\item{shared.rank}{Number of shared variates r. If NULL, chosen by
+sequential (deflated) parallel analysis: at each step the largest
+generalized CCA eigenvalue of the current view scores is compared with
+the permutation distribution of the largest eigenvalue obtained after
+permuting samples independently within each view. If it is significant
+(p < 0.05), that shared direction is removed from every view and the test
+is repeated; the rank is the number of significant steps. Comparing each
+eigenvalue with the null of the eigenvalue of the same index instead
+over-selects, because a real shared factor pushes all later observed
+eigenvalues up.}
 
-\item{nperm}{Permutations for the parallel analysis.}
+\item{nperm}{Permutations per parallel-analysis step (default 200). The
+permutation p-value of each step is stored in \code{gcca.pvalue} (one
+per step tested, so the selected rank plus the first non-significant
+step), the 95th percentile of each step's null in \code{gcca.threshold},
+the tested eigenvalues in \code{gcca.step.eigen}, and a warning is given
+when the selected rank rests on a borderline step.}
 
 \item{view.transform}{Optional transform per view before fitting. Supported
 values are \code{"none"}, \code{"clr"}, and \code{"log1p"}. For microbiome data, use
 \code{"clr"} to fit and simulate on centered log-ratio scale.}
+
+\item{seed}{Random seed (default \code{1234}, the same default as every
+other MimeSys function). Tie-breaking in the normal scores and the
+shared-rank permutations are random, so the seed makes the fit
+reproducible. The caller's random-number state is restored afterwards;
+use \code{NULL} to draw from the current random-number stream.}
+
+\item{shared.rank.runs}{Number of stability-selection runs used when
+\code{shared.rank = NULL} (default 1). The parallel-analysis choice is
+repeated this many times, each with fresh tie-breaking and permutations,
+and the rounded mean of the selected ranks is used; the runs, their
+distribution and the share of runs equal to the chosen rank are stored in
+\code{shared.rank.selection}, with a message when fewer than half agree.
+The default single run warns when the choice is borderline; use, e.g., 20
+runs to stabilize a borderline choice.}
 }
 \value{
-An object of class \code{mimesys_template}.
+An object of class \code{mimesys_template}. The template keeps the
+empirical matrices used for fitting (\code{observed}) and each feature's
+sorted values (the empirical quantile functions), because crosstalk
+calibration and marginal reconstruction need them. Treat a fitted template
+with the same care as the source data: do not share it, or simulation
+output that embeds it, when the source data are confidential.
 }
 \description{
 Learns, from any matched multiview template, the three ingredients needed to
@@ -52,12 +87,23 @@ space estimated by generalized CCA across the view-level factor scores).
 }
 \details{
 The model is a Gaussian copula with factor structure. For view m,
-\deqn{f_m = \sqrt{\gamma_m} B_m s + (I - \gamma_m B_m B_m^T)^{1/2} \epsilon_m,}
+\deqn{f_m = \sqrt{\gamma_m} B_m s + (I - \gamma_m B_m B_m^T)^{1/2}
+\epsilon_m,}
 \deqn{z_m = \Lambda_m f_m + e_m, \quad x_{mj} = Q_{mj}(\Phi(z_{mj})),}
 with shared variates \eqn{s \sim N(0, I_r)}, \eqn{Var(f_m) = I} and
-\eqn{e_{mj} \sim N(0, 1 - ||\Lambda_{mj}||^2)}. The cross-view factor covariance
+\eqn{e_{mj} \sim N(0, 1 - ||\Lambda_{mj}||^2)}. The cross-view factor
+covariance
 is \eqn{\sqrt{\gamma_m \gamma_{m'}} B_m B_{m'}^T}, so the crosstalk weights
 \eqn{\gamma} change how strongly views talk to each other without touching
-marginals or within-view structure. \eqn{\gamma = 1} reproduces the template's
+marginals or within-view structure. \eqn{\gamma = 1} reproduces the
+template's
 shared structure and \eqn{\gamma = 0} gives independent views.
+}
+\examples{
+data(stelzer_mae)
+tmpl <- fit_template(
+    stelzer_mae,
+    view.transform = c(Metabolomics = "log1p", Proteomics = "log1p")
+)
+tmpl
 }

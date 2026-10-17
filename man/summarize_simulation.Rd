@@ -11,8 +11,17 @@ summarize_simulation(sim)
 }
 \value{
 A list containing sample, feature, crosstalk, outcome, and signal
-summaries.
+summaries: the number of outcome-driving features, the outcome
+distribution (event times for survival), case prevalence for binary and
+event rate for survival outcomes, and the per-replicate agreement between
+the outcome and the true signal.
 }
 \description{
 Summarize a MimeSys simulation object
+}
+\examples{
+data(stelzer_mae)
+tmpl <- fit_template(stelzer_mae, shared.rank = 2)
+sim <- gen_simmba(nsample = 40, template = tmpl, p = 10, nrep = 2, seed = 1)
+summarize_simulation(sim)
 }

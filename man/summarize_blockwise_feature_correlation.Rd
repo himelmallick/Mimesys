@@ -18,3 +18,9 @@ A data frame with one row per view-pair block.
 \description{
 Summarize blockwise feature correlations
 }
+\examples{
+data(stelzer_mae)
+views <- as_mimesys_view_list(stelzer_mae)
+corr <- blockwise_feature_correlation(views, max_features_per_view = 10)
+summarize_blockwise_feature_correlation(corr)
+}

@@ -42,3 +42,13 @@ Path to the saved PDF.
 \description{
 Save a blockwise feature-correlation plot
 }
+\examples{
+data(stelzer_mae)
+views <- as_mimesys_view_list(stelzer_mae)
+if (requireNamespace("ggplot2", quietly = TRUE)) {
+    path <- save_blockwise_feature_correlation_plot(
+        views, plot_dir = tempdir(), max_features_per_view = 10
+    )
+    file.exists(path)
+}
+}

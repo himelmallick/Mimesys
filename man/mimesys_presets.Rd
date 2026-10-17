@@ -12,3 +12,6 @@ A data frame describing built-in presets for \code{\link[=simulate_mimesys]{simu
 \description{
 List built-in MimeSys simulation presets
 }
+\examples{
+mimesys_presets()
+}

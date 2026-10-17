@@ -25,7 +25,8 @@ value is supplied, the same cap is used for every view.}
 \item{method}{Correlation method passed to \code{stats::cor()}.}
 
 \item{feature_order}{Feature ordering within each view. \code{"input"} keeps the
-current column order; \code{"cluster"} orders features by hierarchical clustering
+current column order; \code{"cluster"} orders features by hierarchical
+clustering
 on within-view correlation distance.}
 }
 \value{
@@ -34,4 +35,10 @@ columns describing the block membership.
 }
 \description{
 Compute blockwise feature-feature correlations across omics views
+}
+\examples{
+data(stelzer_mae)
+views <- as_mimesys_view_list(stelzer_mae)
+corr <- blockwise_feature_correlation(views, max_features_per_view = 10)
+head(corr)
 }

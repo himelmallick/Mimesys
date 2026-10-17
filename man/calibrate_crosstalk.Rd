@@ -13,12 +13,8 @@ calibrate_crosstalk(
   feature.select = c("random", "variance"),
   feature.jitter = 0.2,
   max_features_per_view = NULL,
-  dependence = c("factor", "empirical_copula", "module_copula"),
-  cor.shrinkage = 0.05,
-  module.count = NULL,
-  module.between.shrinkage = 0.75,
   view.models = NULL,
-  seed = 1,
+  seed = 1234,
   ...
 )
 }
@@ -40,15 +36,8 @@ calibrate_crosstalk(
 \item{max_features_per_view}{Optional named cap used when computing
 correlation distances. If \code{NULL}, every matched empirical feature is used.}
 
-\item{dependence}{Dependence simulator passed to \code{sim_from_template()}.}
-
-\item{cor.shrinkage}{Shrinkage passed to \code{sim_from_template()} when
-\code{dependence = "empirical_copula"} or \code{"module_copula"}.}
-
-\item{module.count, module.between.shrinkage}{Module-copula parameters passed
-to \code{gen_simmba()}.}
-
-\item{view.models}{Optional named vector of per-view observation models passed
+\item{view.models}{Optional named vector of per-view observation models
+passed
 to \code{sim_from_template()}.}
 
 \item{seed}{Random seed.}
@@ -56,13 +45,31 @@ to \code{sim_from_template()}.}
 \item{...}{Passed to \code{fit_template()} when \code{template} is raw data.}
 }
 \value{
-A list with replicate-level distances, summarized distances, the
-selected crosstalk value, selection frequencies across null replicates,
-and a near-optimal set defined as values within one standard error of the
-minimum mean cross-block distance.
+A list. \code{best_crosstalk} is the grid value with the smallest mean
+cross-view distance, where each replicate's distance is averaged over all
+cross-view blocks. \code{cross_view_summary} gives that mean, its SD and SE per
+grid value; \code{near_optimal} lists values within one SE of the minimum;
+\code{selection_frequency} gives how often each value is best in individual
+replicates. \code{cross_block_summary} and \code{summary} give per-block distances
+and \code{raw} the replicate-level distances.
 }
 \description{
 Sweeps candidate crosstalk values, simulates null data from the supplied
-template, and chooses the value that minimizes the rescaled Frobenius distance
+template, and chooses the value that minimizes the rescaled Frobenius
+distance
 between empirical and simulated cross-view feature-correlation blocks.
+}
+\details{
+Simulated data are always compared with the matrices stored in the
+fitted template (after any \code{view.transform}), so raw input fitted with
+a transform is calibrated on the transformed scale. Grid values above
+\code{crosstalk_max(template)} are dropped with a warning, and a warning is
+given when the best value sits at the upper end of the grid.
+}
+\examples{
+data(stelzer_mae)
+tmpl <- fit_template(stelzer_mae, shared.rank = 2)
+cal <- calibrate_crosstalk(tmpl, crosstalk_grid = c(0, 0.5, 1), nrep = 2)
+cal$best_crosstalk
+cal$selection_frequency
 }

@@ -1,2 +1,13 @@
 ^.*\.Rproj$
 ^\.Rproj\.user$
+^\.DS_Store$
+.*\.DS_Store$
+^\.github$
+^docs$
+^inst/extdata/FranzosaE_2019_raw\.rds$
+^inst/extdata/HuMMANet_FranzosaE_2019_raw\.rds$
+^inst/extdata/HuMMANet_FranzosaE_2019_template\.RData$
+^inst/extdata/HuMMANet_FranzosaE_2019_template\.rds$
+^inst/extdata/StelzerDOS\.RData$
+^.*\.Rhistory$
+^mediation_spiking$

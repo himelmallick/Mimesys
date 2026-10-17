@@ -24,3 +24,12 @@ A \code{ggplot} object.
 \description{
 Plot a compact heatmap of block-level correlations
 }
+\examples{
+data(stelzer_mae)
+views <- as_mimesys_view_list(stelzer_mae)
+corr <- blockwise_feature_correlation(views, max_features_per_view = 10)
+block <- summarize_blockwise_feature_correlation(corr)
+if (requireNamespace("ggplot2", quietly = TRUE)) {
+    plot_blockwise_correlation_summary(block)
+}
+}

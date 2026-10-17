@@ -20,8 +20,15 @@ If \code{NULL}, the first assay is used.}
 A named list of numeric sample-by-feature matrices.
 }
 \description{
-Converts common multi-omics containers to the internal MimeSys representation:
-a named list of numeric matrices with samples in rows and features in columns.
+Converts common multi-omics containers to the internal MimeSys
+representation:
+a named list of numeric matrices with samples in rows and features in
+columns.
 \code{MultiAssayExperiment} and \code{SummarizedExperiment} assays are transposed from
 the Bioconductor convention of features in rows and samples in columns.
+}
+\examples{
+data(stelzer_mae)
+views <- as_mimesys_view_list(stelzer_mae)
+vapply(views, dim, integer(2))
 }

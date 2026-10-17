@@ -22,3 +22,7 @@ the minimum structural requirements of MimeSys and returns a per-view input
 summary. When sample identifiers are available, the summary includes the
 number shared across all views.
 }
+\examples{
+data(stelzer_mae)
+validate_mimesys_input(stelzer_mae)
+}

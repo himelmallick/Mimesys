@@ -29,3 +29,13 @@ matching vector of simulated feature-feature correlations within each view
 block. This asks whether the simulated data preserve the pattern of the
 correlation matrix, not only its average magnitude.
 }
+\examples{
+data(stelzer_mae)
+tmpl <- fit_template(stelzer_mae, shared.rank = 2)
+sim <- gen_simmba(nsample = 53, template = tmpl, nrep = 1, seed = 1)
+obs <- blockwise_feature_correlation(tmpl$observed)
+simulated <- blockwise_feature_correlation(
+    simulation_view_matrices(sim, feature_names = "template_feature")
+)
+compare_feature_correlation_structure(obs, simulated)
+}

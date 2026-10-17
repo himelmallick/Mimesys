@@ -11,7 +11,8 @@ plot_blockwise_correlation_difference(
 )
 }
 \arguments{
-\item{comparison_df}{Data frame from \code{compare_blockwise_correlation_summary()}.}
+\item{comparison_df}{Data frame from
+\code{compare_blockwise_correlation_summary()}.}
 
 \item{title}{Plot title.}
 
@@ -23,4 +24,19 @@ A \code{ggplot} object.
 }
 \description{
 Plot observed-vs-simulated block correlation differences
+}
+\examples{
+data(stelzer_mae)
+tmpl <- fit_template(stelzer_mae, shared.rank = 2)
+sim <- gen_simmba(nsample = 53, template = tmpl, nrep = 1, seed = 1)
+obs <- summarize_blockwise_feature_correlation(
+    blockwise_feature_correlation(tmpl$observed)
+)
+simulated <- summarize_blockwise_feature_correlation(
+    blockwise_feature_correlation(simulation_view_matrices(sim))
+)
+cmp <- compare_blockwise_correlation_summary(obs, simulated)
+if (requireNamespace("ggplot2", quietly = TRUE)) {
+    plot_blockwise_correlation_difference(cmp)
+}
 }

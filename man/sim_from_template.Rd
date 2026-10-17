@@ -11,11 +11,9 @@ sim_from_template(
   crosstalk = 1,
   feature.select = c("random", "variance"),
   feature.jitter = 0.2,
-  dependence = c("factor", "empirical_copula", "module_copula"),
-  cor.shrinkage = 0.05,
-  module.count = NULL,
-  module.between.shrinkage = 0.75,
-  view.models = NULL
+  view.models = NULL,
+  back.transform = FALSE,
+  seed = 1234
 )
 }
 \arguments{
@@ -26,41 +24,75 @@ sim_from_template(
 \item{p}{Feature counts per view. Use \code{NULL} to keep template sizes, a
 single integer to use the same count for every view, an unnamed vector in
 template view order, or a named vector with one value per view. Fewer
-features than the template subsamples features; more adds offspring features
+features than the template subsamples features; more adds offspring
+features
 (see \code{feature.jitter}).}
 
 \item{crosstalk}{Crosstalk weights gamma, scalar or one per view. 0 gives
 independent views, 1 the template level, values above 1 amplify it up to
 \code{crosstalk_max()}. Unequal weights let some views carry more of the
-shared structure than others (the analogue of t_x != t_z in Ding et al. 2022).}
+shared structure than others (the analogue of t_x != t_z in Ding et al.
+2022).}
 
 \item{feature.select}{Feature choice when p is below template size:
-"random" or "variance" (highest raw variance first).}
+"random" or "variance" (highest variance first, on the fitted scale, i.e.
+after any \code{view.transform}).}
 
 \item{feature.jitter}{Between 0 and 1. An offspring feature copies a parent's
-marginal and gets loadings sqrt(1 - jitter) * parent + sqrt(jitter) * another
+marginal and gets loadings sqrt(1 - jitter) * parent + sqrt(jitter) *
+another
 feature, so it resembles but does not duplicate its parent.}
 
-\item{dependence}{Latent dependence simulator. \code{"factor"} uses the low-rank
-template factor model; \code{"empirical_copula"} uses the empirical latent feature
-correlation; \code{"module_copula"} smooths empirical latent correlations by
-within-view modules.}
-
-\item{cor.shrinkage}{Shrinkage toward independence for copula dependence modes.}
-
-\item{module.count, module.between.shrinkage}{Module-copula tuning parameters.}
-
 \item{view.models}{Optional named vector of per-view observation models. Use
-\code{"two_part_copula"} for sparse compositional microbiome views; other views
-default to \code{"continuous"}.}
+\code{"two_part_copula"} for sparse microbiome views: presence/absence is drawn
+from each feature's zero probability and, given presence, abundance from
+that feature's positive values. Other views default to \code{"continuous"}.
+The two-part model is for sparse non-negative abundances only: views with
+negative values, or fitted with \code{view.transform = "clr"}, give an error.
+See Details for the composition constraint.}
+
+\item{back.transform}{Logical; if \code{TRUE}, views fitted with a
+\code{view.transform} are returned on the original measurement scale. Each
+simulated feature's latent uniform is mapped through that feature's
+original-scale empirical quantile function, which is the exact inverse for
+\code{log1p} and, for \code{clr}, reproduces each feature's original
+marginal (including zeros) with dependence from the CLR-scale model.
+The default \code{FALSE} returns the fitted (transformed) scale, which is what
+calibration and validation compare against.}
+
+\item{seed}{Random seed (default \code{1234}, the same default as every other
+MimeSys simulator). The caller's random-number state is restored on exit.
+Use \code{NULL} to draw from the current random-number stream.}
 }
 \value{
 A pcl-style list (feature_table features x samples, sample_metadata,
-feature_metadata) plus \code{truth}: factor scores, shared variates, crosstalk
+feature_metadata) plus \code{truth}: factor scores, shared variates,
+crosstalk
 weights and implied latent canonical correlations. feature_metadata has
 \code{shared_loading}, the correlation of each feature's normal score with
 shared variate 1 at crosstalk = 1 (used for spike-in alignment).
 }
 \description{
 Simulate null multiview data from a fitted template
+}
+\details{
+Composition constraint. For a view whose original-scale data are a
+composition, simulated samples never exceed the template total. If every
+template sample has the same total (a closed composition, e.g. relative
+abundances summing to 1) and at least the template's features are
+simulated, including offspring features, every simulated sample is
+renormalized to that total; offspring features therefore dilute the
+others. If fewer features are simulated, samples above the total are
+scaled down to it. If the template is itself a subset of a composition
+(values in [0, 1] with sample totals at most 1), samples above the
+largest observed total are scaled down to it. The constraint applies to
+original-scale output (untransformed views, or transformed views with
+\code{back.transform = TRUE}).
+}
+\examples{
+data(stelzer_mae)
+tmpl <- fit_template(stelzer_mae, shared.rank = 2)
+null <- sim_from_template(tmpl, n = 30, p = 10, crosstalk = 0.5)
+dim(null$feature_table)
+head(null$feature_metadata)
 }

@@ -16,7 +16,8 @@ plot_crosstalk_calibration(
 \item{include_diagonal}{Logical; if \code{FALSE}, only cross-view blocks are
 shown because those are the blocks used to choose the best crosstalk.}
 
-\item{show_sd}{Logical; if \code{TRUE}, add \code{mean +/- sd} error bars when
+\item{show_sd}{Logical; if \code{TRUE}, add \code{mean +/- sd} error bars
+when
 replicate-level standard deviations are available.}
 }
 \value{
@@ -25,6 +26,15 @@ A \code{ggplot} object.
 \description{
 Visualizes the output of \code{calibrate_crosstalk()} by plotting the mean
 rescaled Frobenius distance between observed and simulated correlation blocks
-across candidate crosstalk values. Lower values indicate better reconstruction
+across candidate crosstalk values. Lower values indicate better
+reconstruction
 of the observed correlation structure.
+}
+\examples{
+data(stelzer_mae)
+tmpl <- fit_template(stelzer_mae, shared.rank = 2)
+cal <- calibrate_crosstalk(tmpl, crosstalk_grid = c(0, 0.5, 1), nrep = 2)
+if (requireNamespace("ggplot2", quietly = TRUE)) {
+    plot_crosstalk_calibration(cal)
+}
 }

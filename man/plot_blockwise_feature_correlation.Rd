@@ -24,7 +24,8 @@ is read from \code{corr_df}.}
 \item{layout}{Either \code{"matrix"} for one full matrix with block boundaries or
 \code{"faceted"} for one facet per view-pair block.}
 
-\item{show_feature_diagonal}{Logical; if \code{FALSE}, the feature self-correlation
+\item{show_feature_diagonal}{Logical; if \code{FALSE}, the feature
+self-correlation
 diagonal is hidden so block structure is easier to see.}
 
 \item{color_limit}{Optional positive number used as the symmetric color limit
@@ -35,4 +36,12 @@ A \code{ggplot} object.
 }
 \description{
 Plot blockwise feature-feature correlations across omics views
+}
+\examples{
+data(stelzer_mae)
+views <- as_mimesys_view_list(stelzer_mae)
+corr <- blockwise_feature_correlation(views, max_features_per_view = 10)
+if (requireNamespace("ggplot2", quietly = TRUE)) {
+    plot_blockwise_feature_correlation(corr)
+}
 }

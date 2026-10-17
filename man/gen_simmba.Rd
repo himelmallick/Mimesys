@@ -11,10 +11,6 @@ gen_simmba(
   crosstalk = 1,
   feature.select = c("random", "variance"),
   feature.jitter = 0.2,
-  dependence = c("factor", "empirical_copula", "module_copula"),
-  cor.shrinkage = 0.05,
-  module.count = NULL,
-  module.between.shrinkage = 0.75,
   view.models = NULL,
   snr = 1,
   p.train = 0.7,
@@ -25,15 +21,22 @@ gen_simmba(
   de.align = NULL,
   signal.share = NULL,
   friedman.share = NULL,
-  ygen.mode = c("LM", "Friedman", "Friedman2", "SharedLatent"),
+  ygen.mode = c("LM", "Friedman", "Friedman2", "SharedLatent", "Interaction"),
   shared.latent.fun = c("linear", "friedman", "friedman2"),
   shared.latent.n_factors = NULL,
+  nonlinear.weight = 0.5,
+  interaction.weight = 0.5,
+  n.interactions = NULL,
   outcome.type = c("continuous", "binary", "survival"),
+  binary.prevalence = 0.5,
   surv.hscale = 1,
+  cens.rate = NULL,
   cens.lower = 1,
   cens.upper = 3,
-  nrep = 100,
+  nrep = 1,
   seed = 1234,
+  return.template = FALSE,
+  back.transform = FALSE,
   ...
 )
 }
@@ -42,7 +45,8 @@ gen_simmba(
 train/test split.}
 
 \item{template}{Either a \code{mimesys_template} from \code{fit_template()}
-(recommended: fit once, reuse) or a named list of sample x feature matrices,
+(recommended: fit once, reuse) or a named list of sample x feature
+matrices,
 which is then fitted with \code{fit_template(template, ...)}.}
 
 \item{p}{Feature counts per view. Use \code{NULL} to keep template sizes, a
@@ -50,46 +54,40 @@ single integer to use the same count for every view, an unnamed vector in
 template view order, or a named vector with one value per view.}
 
 \item{crosstalk}{Multiplier on template cross-view dependence. Use a scalar
-for the same value in every view or one value per view. A value of 0 removes
+for the same value in every view or one value per view. A value of 0
+removes
 shared latent structure, 1 uses the fitted template level, and values above
 1 amplify shared structure up to \code{crosstalk_max(template)}.}
 
-\item{feature.select}{Feature choice rule passed to \code{sim_from_template()}
+\item{feature.select}{Feature choice rule passed to
+\code{sim_from_template()}
 when \code{p} is below the template feature count. Use \code{"random"} or
 \code{"variance"}.}
 
 \item{feature.jitter}{Offspring-feature perturbation passed to
-\code{sim_from_template()} when \code{p} exceeds the template feature count.
+\code{sim_from_template()} when \code{p} exceeds the template feature
+count.
 Values near 0 make offspring closer to their parent features; larger values
 add more loading-level perturbation.}
 
-\item{dependence}{Dependence simulator passed to \code{sim_from_template()}.
-\code{"factor"} keeps the current low-rank template simulator; \code{"empirical_copula"}
-uses the empirical latent feature correlation more directly; and
-\code{"module_copula"} smooths the empirical latent correlation by feature
-modules.}
-
-\item{cor.shrinkage}{Shrinkage toward independence for
-\code{dependence = "empirical_copula"} or \code{"module_copula"}.}
-
-\item{module.count}{Number of within-view feature modules for
-\code{dependence = "module_copula"}. If \code{NULL}, a data-adaptive default is
-used per view.}
-
-\item{module.between.shrinkage}{How strongly to smooth correlations between
-modules in \code{dependence = "module_copula"}.}
-
-\item{view.models}{Optional named vector of per-view observation models passed
+\item{view.models}{Optional named vector of per-view observation models
+passed
 to \code{sim_from_template()}. Use \code{"two_part_copula"} for sparse
 compositional microbiome views; unspecified views use \code{"continuous"}.}
 
-\item{snr}{Signal-to-noise ratio for continuous outcomes. Larger values
-create easier prediction tasks.}
+\item{snr}{Signal-to-noise ratio. For continuous outcomes it is
+\code{Var(eta) / Var(noise)}. For binary and survival outcomes the linear
+predictor is standardized and rescaled so that \code{snr} has the same
+latent-scale meaning: \code{Var(eta) / (pi^2 / 3)} for the logistic latent
+variable and \code{Var(eta) / (pi^2 / 6)} for the log event time. Larger
+values create easier prediction tasks.}
 
 \item{p.train}{Proportion of samples assigned to the training split.}
 
 \item{de.prob}{Probability that a feature receives a nonzero spike-in
-coefficient; scalar or one value per view.}
+coefficient; scalar, one value per view, or named by view. Every view with
+\code{de.prob > 0} gets at least one nonzero coefficient; use 0 for a view
+that should carry no linear signal.}
 
 \item{de.downProb}{Probability that a nonzero spike-in coefficient is
 negative; scalar or one value per view.}
@@ -100,69 +98,153 @@ scalar or one value per view.}
 \item{de.facScale}{Scale parameter for the log-normal effect-size factor;
 scalar or one value per view.}
 
-\item{de.align}{NULL keeps the original spike-in (DE positions and signs drawn
+\item{de.align}{NULL keeps the original spike-in (DE positions and signs
+drawn
 independently per view). A value between 0 and 1 places that fraction of DE
-features on features loading on the shared cross-view direction (sampled with
+features on features loading on the shared cross-view direction (sampled
+with
 probability proportional to the squared loading) with signs following that
-direction, so view-specific signals agree to the extent the views cross-talk.}
+direction, so view-specific signals agree to the extent the views
+cross-talk.}
 
 \item{signal.share}{Optional numeric vector controlling the relative marginal
 variance contribution of each view's linear predictor. If NULL, spike-in
 coefficients are left on their original scale. If supplied, values are
 recycled or matched by view name, normalized to sum to one, and each view's
-coefficients are rescaled so its view-specific linear predictor has variance
+coefficients are rescaled so its view-specific linear predictor has
+variance
 equal to the requested share. For example, \code{c(1, 1, 1)} creates a
-balanced complementary-signal setting where no view is intended to dominate.}
+balanced complementary-signal setting where no view is intended to
+dominate.}
 
 \item{friedman.share}{Optional numeric vector controlling which views supply
 the five nonlinear Friedman features when \code{ygen.mode} is
-\code{"Friedman"} or \code{"Friedman2"}. Values are recycled or matched by
-view name and normalized to sum to one. If NULL, \code{signal.share} is used
-when available; otherwise Friedman features are sampled uniformly from all
-nonzero spiked features.}
+\code{"Friedman"} or \code{"Friedman2"}: a single value, one value per view
+or a vector named by view, normalized to sum to one. Each of the five
+features comes from a view chosen with probability equal to its share
+(regardless of how many candidate features the view has), then uniformly
+among that view's spiked features. If NULL, \code{signal.share} is used
+when available; otherwise the five features are sampled uniformly from all
+spiked features.}
 
 \item{ygen.mode}{Y generation mode: "LM", "Friedman", "Friedman2",
-or "SharedLatent". Friedman modes apply the Friedman formula after
-rank-transforming the selected simulated features to the unit interval.
-"SharedLatent" uses all simulated shared latent factors, combined as a
-standardized equal-weight score.}
+"SharedLatent", or "Interaction". Friedman modes apply the Friedman formula
+after rank-transforming the selected simulated features to the unit
+interval; "Friedman2" mixes it with the linear predictor using
+\code{nonlinear.weight}. "SharedLatent" uses the simulated shared latent
+factors. "Interaction" mixes the linear predictor with products of feature
+pairs taken from different views, using \code{interaction.weight}.}
 
 \item{shared.latent.fun}{Response function used when
 \code{ygen.mode = "SharedLatent"}. \code{"linear"} combines selected shared
-latent factors as a standardized equal-weight score, preserving the previous
+latent factors as a standardized equal-weight score, preserving the
+previous
 behavior. \code{"friedman"} applies the Friedman nonlinear function to the
 first five selected shared latent factors after rank-transforming them to
-the unit interval. \code{"friedman2"} adds the linear shared-latent score to
-the Friedman nonlinear component.}
+the unit interval. \code{"friedman2"} mixes the linear shared-latent score
+with the Friedman nonlinear component using \code{nonlinear.weight}.}
 
 \item{shared.latent.n_factors}{Number of shared latent factors to use for
 \code{ygen.mode = "SharedLatent"}. If \code{NULL}, all available shared
 factors are used. Friedman shared-latent functions require at least five
 selected shared factors.}
 
+\item{nonlinear.weight}{Share of signal variance from the nonlinear Friedman
+part, between 0 and 1, for \code{ygen.mode = "Friedman2"} and
+\code{shared.latent.fun = "friedman2"}. Both parts are standardized and
+combined as \code{sqrt(1 - w) * linear + sqrt(w) * nonlinear}.}
+
+\item{interaction.weight}{Share of signal variance from cross-view
+interactions, between 0 and 1, for \code{ygen.mode = "Interaction"}.
+\code{1} gives a pure interaction outcome with no main effects.}
+
+\item{n.interactions}{Number of cross-view feature pairs for
+\code{ygen.mode = "Interaction"}. Defaults to the number of view pairs.
+Pairs cycle over view pairs; each feature is drawn from that view's
+nonzero-coefficient features when available.}
+
 \item{outcome.type}{Outcome type: \code{"continuous"}, \code{"binary"}, or
 \code{"survival"}. Continuous and binary outcomes are stored as
 \code{Y}; survival outcomes are stored as \code{time} and \code{status}.}
 
-\item{surv.hscale}{Multiplicative scale on hazard for survival outcomes.}
+\item{binary.prevalence}{Target proportion of cases for binary outcomes.
+The logistic intercept is solved in each replicate so that the expected
+prevalence equals this value.}
 
-\item{cens.lower}{Lower bound for uniform censoring time.}
+\item{surv.hscale}{Multiplicative scale on the baseline hazard for survival
+outcomes.}
 
-\item{cens.upper}{Upper bound for uniform censoring time.}
+\item{cens.rate}{Optional target censoring proportion for survival outcomes.
+If supplied, censoring times are uniform on \code{(0, c)} with \code{c}
+solved so that this proportion of subjects is censored; \code{0} means no
+censoring. If \code{NULL}, censoring times are uniform on
+\code{(cens.lower, cens.upper)}.}
 
-\item{nrep}{Number of independent simulation replicates.}
+\item{cens.lower}{Lower bound for uniform censoring time when
+\code{cens.rate} is \code{NULL}.}
 
-\item{seed}{Random seed.}
+\item{cens.upper}{Upper bound for uniform censoring time when
+\code{cens.rate} is \code{NULL}.}
+
+\item{nrep}{Number of independent simulation replicates (default 1).}
+
+\item{seed}{Random seed. The global random-number state is restored when the
+function returns. Use \code{NULL} to use the current random state.}
+
+\item{return.template}{Logical; if \code{TRUE}, the fitted template is
+returned in \code{$template}. The template contains the source data (see
+\code{fit_template()}), so the default \code{FALSE} returns only its
+provenance in \code{$template_provenance}, making the result safe to share.}
+
+\item{back.transform}{Logical; if \code{TRUE}, returned features of views
+fitted with a \code{view.transform} are mapped back to the original
+measurement scale (see \code{sim_from_template()}). Outcomes are always
+generated from the fitted (transformed) scale.}
 
 \item{...}{Passed to \code{fit_template()} when \code{template} is a raw list}
 }
 \value{
-List with trainDat, testDat, simulation parameters, the fitted
-template, realized canonical correlations (\code{cancor}) and per-replicate
-empirical agreement between view-specific linear predictors (\code{agreement.emp}).
+List with trainDat, testDat, simulation parameters, the template
+provenance (or the template itself if \code{return.template = TRUE}),
+realized canonical correlations (\code{cancor}) and per-replicate
+empirical agreement between view-specific linear predictors
+(\code{agreement.emp}).
 }
 \description{
 Generates null multiview data from a real template (see \code{fit_template()}
 and \code{sim_from_template()}), spikes in signal, generates the outcome, and
 splits the data into training and testing sets.
+}
+\details{
+The ground truth for which features drive the outcome is in
+\code{feature_metadata$outcome_feature}. \code{beta} is nonzero only for
+features that enter the outcome through the linear predictor; in
+\code{"Friedman"}, \code{"SharedLatent"} and pure-interaction outcomes it
+is
+zero for every feature. \code{friedman_term} and \code{interaction_term}
+mark the nonlinear and interaction features, and
+\code{truth$interaction_pairs} lists the interacting pairs.
+
+Linear predictor. Within each replicate, every simulated feature is
+standardized to mean 0 and SD 1 across the simulated samples before it is
+multiplied by its coefficient, so \code{beta} is an effect per standard
+deviation and views on very different measurement scales contribute
+comparably. The linear predictor is \code{Xs \%*\% beta}, with \code{Xs}
+the standardized feature matrix (with \code{signal.share}, each view's
+part is rescaled first). For continuous outcomes the noise variance is
+then set to \code{Var(eta) / snr}; for binary and survival outcomes the
+predictor is standardized and rescaled to match \code{snr}, and the
+final predictor is stored in \code{sample_metadata$Xbeta}. To reproduce the predictor from the returned data,
+standardize the features of the full replicate (training and testing
+samples together) on the scale they were simulated on.
+}
+\examples{
+data(stelzer_mae)
+tmpl <- fit_template(stelzer_mae, shared.rank = 2)
+sim <- gen_simmba(
+    nsample = 60, template = tmpl, p = 10, nrep = 2,
+    ygen.mode = "Interaction", outcome.type = "binary", seed = 1
+)
+head(sim$trainDat$Rep_1$sample_metadata)
+sim$trainDat$Rep_1$truth$interaction_pairs
 }

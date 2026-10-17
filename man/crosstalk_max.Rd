@@ -9,9 +9,21 @@ crosstalk_max(tmpl, per.view = FALSE)
 \arguments{
 \item{tmpl}{A \code{mimesys_template}.}
 
-\item{per.view}{Return one limit per view instead of the overall scalar limit.}
+\item{per.view}{Return one limit per view instead of the overall scalar
+limit.}
+}
+\value{
+A single number (the smallest per-view limit) or, if
+\code{per.view = TRUE}, a named numeric vector with one limit per view.
 }
 \description{
-The construction needs \eqn{\gamma_m B_m B_m^T \le I}, so the limit for view m
+The construction needs \eqn{\gamma_m B_m B_m^T \le I}, so the limit for view
+m
 is \eqn{1 / \sigma_{max}(B_m)^2}, which is always at least 1.
+}
+\examples{
+data(stelzer_mae)
+tmpl <- fit_template(stelzer_mae, shared.rank = 2)
+crosstalk_max(tmpl)
+crosstalk_max(tmpl, per.view = TRUE)
 }

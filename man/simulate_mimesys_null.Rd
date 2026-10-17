@@ -12,7 +12,9 @@ simulate_mimesys_null(
   null_model = list(),
   template_args = list(),
   calibration = list(),
-  seed = 1234
+  nrep = 1,
+  seed = 1234,
+  return_type = c("mae", "simulation")
 )
 }
 \arguments{
@@ -29,8 +31,10 @@ blocks. Supply a numeric value to bypass calibration; \code{0} removes template
 shared structure and \code{1} uses the fitted template level.}
 
 \item{null_model}{Named list controlling null-data generation. Options are
-\code{dependence}, \code{feature_select}, \code{feature_jitter}, \code{cor_shrinkage},
-\code{module_count}, \code{module_between_shrinkage}, and \code{view_models}.}
+\code{feature_select}, \code{feature_jitter}, \code{view_models}, and \code{back_transform}
+(default \code{FALSE}: views fitted with a \code{view.transform} are returned on
+the fitted, transformed scale; set \code{TRUE} for the original measurement
+scale, see \code{\link[=sim_from_template]{sim_from_template()}}).}
 
 \item{template_args}{Named list passed to \code{\link[=fit_template]{fit_template()}} only when
 \code{template} is not already fitted.}
@@ -38,15 +42,32 @@ shared structure and \code{1} uses the fitted template level.}
 \item{calibration}{Named list controlling automatic crosstalk calibration.
 Options are \code{grid}, \code{nrep}, \code{nsample}, and \code{max_features_per_view}.}
 
+\item{nrep}{Number of independent null replicates. One replicate returns a
+\code{MultiAssayExperiment}; several return a \code{mimesys_mae_simulation} list.}
+
 \item{seed}{Random seed.}
+
+\item{return_type}{\code{"mae"} (default) returns MAE output; \code{"simulation"}
+returns a list with the pcl-style \code{replicates} from \code{\link[=sim_from_template]{sim_from_template()}},
+\code{settings}, and the fitted \code{template}.}
 }
 \value{
-A null-data \code{MultiAssayExperiment}. The selected crosstalk value and
-full calibration result are stored in \code{metadata(x)$simulation}.
+A null-data \code{MultiAssayExperiment} (or a \code{mimesys_mae_simulation}
+list when \code{nrep > 1}). The selected crosstalk value and full calibration
+result are stored in \code{metadata(x)$simulation}.
 }
 \description{
 Fits or accepts a MimeSys template, calibrates crosstalk by default using
 empirical cross-view correlation blocks, and returns simulated null feature
 data in a \code{\link[MultiAssayExperiment:MultiAssayExperiment]{MultiAssayExperiment::MultiAssayExperiment()}}. No spike-in
 coefficients or outcomes are generated.
+}
+\examples{
+data(stelzer_mae)
+tmpl <- fit_template(stelzer_mae, shared.rank = 2)
+null_mae <- simulate_mimesys_null(
+    tmpl, n = 40, p = 10,
+    calibration = list(grid = c(0, 0.5, 1), nrep = 1)
+)
+S4Vectors::metadata(null_mae)$simulation$crosstalk
 }

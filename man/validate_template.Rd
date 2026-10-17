@@ -11,13 +11,9 @@ validate_template(
   nrep = 5,
   crosstalk_grid = seq(0, 1, by = 0.25),
   max_features_per_view = 100,
-  dependence = c("factor", "empirical_copula", "module_copula"),
-  cor.shrinkage = 0.05,
-  module.count = NULL,
-  module.between.shrinkage = 0.75,
   view.models = NULL,
   template_args = list(),
-  seed = 1
+  seed = 1234
 )
 }
 \arguments{
@@ -34,21 +30,37 @@ the template sample size.}
 \item{crosstalk_grid}{Candidate crosstalk values.}
 
 \item{max_features_per_view}{Optional cap for detailed correlation and
-marginal diagnostics. This does not alter the calibration, which uses all
-matched features by default.}
+marginal diagnostics: the most variable observed features of each view are
+kept, and the same features are used for the simulated data. This does
+not alter the calibration, which uses all matched features by default.}
 
-\item{dependence, cor.shrinkage, module.count, module.between.shrinkage, }{view.models Null-model controls passed to \code{\link[=sim_from_template]{sim_from_template()}}.}
+\item{view.models}{Optional named vector of per-view observation models
+passed to \code{\link[=sim_from_template]{sim_from_template()}}.}
 
 \item{template_args}{Named list passed to \code{\link[=fit_template]{fit_template()}} for raw input.}
 
 \item{seed}{Random seed.}
 }
 \value{
-An object of class \code{mimesys_template_validation}.
+An object of class \code{mimesys_template_validation}. Its
+\code{marginal_diagnostics} table reports, per view, scale-free summaries
+(\code{mean_ks}, \code{median_ks}: Kolmogorov-Smirnov distance between observed and
+simulated feature distributions; \code{mean_std_quantile_rmse}: quantile RMSE
+divided by the observed feature SD) alongside the raw-unit quantile RMSE.
 }
 \description{
 Calibrates crosstalk using null simulations and returns diagnostics for
 cross-view reconstruction, correlation-pattern preservation, and marginal
 distribution preservation. The report is designed to be inspected directly
 or plotted with \code{\link[=plot_template_validation]{plot_template_validation()}}.
+}
+\examples{
+data(stelzer_mae)
+tmpl <- fit_template(stelzer_mae, shared.rank = 2)
+report <- validate_template(
+    tmpl, nrep = 1, crosstalk_grid = c(0, 0.5, 1),
+    max_features_per_view = 20
+)
+report
+report$marginal_diagnostics
 }

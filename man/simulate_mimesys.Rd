@@ -38,10 +38,13 @@ shared structure and \code{1} uses the fitted template level.}
 choices. Explicit \code{outcome}, \code{signal}, and \code{null_model} values override
 the preset.}
 
-\item{outcome}{Either one of \code{"linear"}, \code{"friedman"}, \code{"friedman2"}, or
-\code{"shared_latent"}, or a named list. List options are \code{model}, \code{type},
-\code{snr}, \code{friedman_share}, \code{shared_latent_function},
-\code{shared_latent_n_factors}, \code{surv_hscale}, \code{cens_lower}, and \code{cens_upper}.}
+\item{outcome}{Either one of \code{"linear"}, \code{"friedman"}, \code{"friedman2"},
+\code{"shared_latent"}, or \code{"interaction"}, or a named list. List options are
+\code{model}, \code{type}, \code{snr}, \code{friedman_share}, \code{shared_latent_function},
+\code{shared_latent_n_factors}, \code{nonlinear_weight}, \code{interaction_weight},
+\code{n_interactions}, \code{prevalence} (binary target case proportion),
+\code{surv_hscale}, \code{cens_rate} (survival target censoring proportion),
+\code{cens_lower}, and \code{cens_upper}. See \code{\link[=gen_simmba]{gen_simmba()}}.}
 
 \item{signal}{Named list controlling spike-ins. Options are \code{de_prob},
 \code{down_probability}, \code{effect_location}, \code{effect_scale}, \code{alignment}, and
@@ -49,8 +52,10 @@ the preset.}
 relative contribution among views with nonzero spike-in signal.}
 
 \item{null_model}{Named list controlling null-data generation. Options are
-\code{dependence}, \code{feature_select}, \code{feature_jitter}, \code{cor_shrinkage},
-\code{module_count}, \code{module_between_shrinkage}, and \code{view_models}.}
+\code{feature_select}, \code{feature_jitter}, \code{view_models}, and \code{back_transform}
+(default \code{FALSE}: views fitted with a \code{view.transform} are returned on
+the fitted, transformed scale; set \code{TRUE} for the original measurement
+scale, see \code{\link[=sim_from_template]{sim_from_template()}}).}
 
 \item{template_args}{Named list passed to \code{\link[=fit_template]{fit_template()}} only when
 \code{template} is not already fitted.}
@@ -79,4 +84,11 @@ This is the recommended user-facing simulation interface. It accepts a
 defaults, and returns simulated data as a \code{MultiAssayExperiment}. The
 lower-level \code{\link[=gen_simmba]{gen_simmba()}} remains available when every simulation control
 must be supplied separately.
+}
+\examples{
+data(stelzer_mae)
+tmpl <- fit_template(stelzer_mae, shared.rank = 2)
+sim_mae <- simulate_mimesys(tmpl, n = 60, p = 10, crosstalk = 0.5, seed = 1)
+sim_mae
+head(MultiAssayExperiment::colData(sim_mae))
 }

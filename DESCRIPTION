@@ -1,23 +1,48 @@
 Package: MimeSys
-Title: Template-Based Multi-Omics Simulation
-Version: 0.0.0.9000
-Date: 2025-04-12
-Author: Himel Mallick <himel.mallick@merck.com>
-Maintainer: Himel Mallick <himel.mallick@merck.com>
-Description: MimeSys simulates multi-omics datasets from fitted real-data templates, preserving marginal distributions and within- and cross-view dependence while adding controllable aligned signal and continuous, binary, or survival outcomes for simulation studies.
+Title: Template-Based Simulation of Multi-Omics Data
+Version: 0.99.0
+Date: 2026-10-16
+Authors@R: c(
+    person("Nalin", "Arora", email = "naa4050@med.cornell.edu",
+        role = c("aut", "cre")),
+    person("Himel", "Mallick", email = "himel.mallick@merck.com",
+        role = "aut"),
+    person("Ziyu", "Liu", role = "aut"))
+Description: MimeSys simulates realistic multi-omics datasets from a template
+    fitted to real data. The template learns each feature's empirical marginal
+    distribution, within-view dependence through a low-rank Gaussian copula
+    factor model, and cross-view dependence through a shared latent space
+    estimated by generalized canonical correlation analysis. Simulated
+    datasets can vary sample size, feature counts and the strength of
+    cross-view dependence, and can carry controlled signal for continuous,
+    binary or survival outcomes, including linear, nonlinear, shared-latent
+    and cross-view interaction scenarios, and can simulate mediation with an
+    exposure, parallel or sequential mediators in any views, and calibrated
+    true direct, indirect and path-specific effects. Inputs and outputs use
+    MultiAssayExperiment containers, and diagnostics compare simulated and
+    empirical correlation structure and marginal distributions.
+License: MIT + file LICENSE
+URL: https://github.com/himelmallick/Mimesys
+BugReports: https://github.com/himelmallick/Mimesys/issues
+Depends:
+    R (>= 4.3.0)
 Imports:
     MultiAssayExperiment,
     S4Vectors,
-    SummarizedExperiment
+    stats,
+    SummarizedExperiment,
+    utils,
+    withr
 Suggests:
+    BiocStyle,
     ggplot2,
     knitr,
-    rlang,
     rmarkdown,
     testthat (>= 3.0.0)
-License: MIT + file LICENSE
+biocViews: Software, StatisticalMethod, SystemsBiology, Metabolomics,
+    Proteomics, Microbiome, DimensionReduction, Regression, Classification,
+    Survival
 Encoding: UTF-8
-biocViews: Simulation, Software, Multiomics
 Roxygen: list(markdown = TRUE)
 VignetteBuilder: knitr
 Config/testthat/edition: 3
