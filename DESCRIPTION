@@ -6,8 +6,7 @@ Authors@R: c(
     person("Nalin", "Arora", email = "naa4050@med.cornell.edu",
         role = c("aut", "cre")),
     person("Himel", "Mallick", email = "himel.mallick@merck.com",
-        role = "aut"),
-    person("Ziyu", "Liu", role = "aut"))
+        role = "aut")
 Description: MimeSys simulates realistic multi-omics datasets from a template
     fitted to real data. The template learns each feature's empirical marginal
     distribution, within-view dependence through a low-rank Gaussian copula
