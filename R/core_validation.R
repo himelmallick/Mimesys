@@ -11,7 +11,7 @@
 #' @examples
 #' data(stelzer_mae)
 #' tmpl <- fit_template(stelzer_mae, shared.rank = 2)
-#' sim <- gen_simmba(nsample = 40, template = tmpl, nrep = 1, seed = 1)
+#' sim <- gen_simmba(n = 40, template = tmpl, nrep = 1, seed = 1)
 #' views <- simulation_view_matrices(sim, rep = 1, split = "train")
 #' vapply(views, dim, integer(2))
 #' @export
@@ -512,7 +512,7 @@ plot_blockwise_correlation_summary <- function(
 #' @examples
 #' data(stelzer_mae)
 #' tmpl <- fit_template(stelzer_mae, shared.rank = 2)
-#' sim <- gen_simmba(nsample = 53, template = tmpl, nrep = 1, seed = 1)
+#' sim <- gen_simmba(n = 53, template = tmpl, nrep = 1, seed = 1)
 #' obs <- summarize_blockwise_feature_correlation(
 #'     blockwise_feature_correlation(tmpl$observed)
 #' )
@@ -560,7 +560,7 @@ compare_blockwise_correlation_summary <- function(
 #' @examples
 #' data(stelzer_mae)
 #' tmpl <- fit_template(stelzer_mae, shared.rank = 2)
-#' sim <- gen_simmba(nsample = 53, template = tmpl, nrep = 1, seed = 1)
+#' sim <- gen_simmba(n = 53, template = tmpl, nrep = 1, seed = 1)
 #' obs <- blockwise_feature_correlation(tmpl$observed)
 #' simulated <- blockwise_feature_correlation(
 #'     simulation_view_matrices(sim, feature_names = "template_feature")
@@ -624,7 +624,7 @@ compare_feature_correlation_structure <- function(observed_corr, simulated_corr,
 #' @examples
 #' data(stelzer_mae)
 #' tmpl <- fit_template(stelzer_mae, shared.rank = 2)
-#' sim <- gen_simmba(nsample = 53, template = tmpl, nrep = 1, seed = 1)
+#' sim <- gen_simmba(n = 53, template = tmpl, nrep = 1, seed = 1)
 #' obs <- summarize_blockwise_feature_correlation(
 #'     blockwise_feature_correlation(tmpl$observed)
 #' )

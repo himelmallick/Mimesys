@@ -25,8 +25,8 @@ Plot a MimeSys template-validation report
 data(stelzer_mae)
 tmpl <- fit_template(stelzer_mae, shared.rank = 2)
 report <- validate_template(
-    tmpl, nrep = 1, crosstalk_grid = c(0, 0.5, 1),
-    max_features_per_view = 20
+    tmpl, nrep = 1, crosstalk.grid = c(0, 0.5, 1),
+    max.features.per.view = 20
 )
 if (requireNamespace("ggplot2", quietly = TRUE)) {
     plot_template_validation(report, type = "marginal")

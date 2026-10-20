@@ -1,1483 +1,1025 @@
 # MimeSys Algorithms
 
-This document describes the simulation algorithms used by MimeSys in detail. The goal is to make the data-generation mechanism transparent enough that each simulation setting can be traced back to a specific statistical operation.
+This document describes, with the mathematics, every algorithm in MimeSys
+(version 0.99.0): how the template is fitted, how null multi-omics data are
+generated, how outcome signal is planted, how crosstalk is calibrated and the
+template validated, and how parallel and sequential mediation are simulated
+with exact causal truth. Each section states what the code does, the model
+behind it, and why it is built that way.
 
-The key separation is:
+The main separation is:
 
-- **Null feature generation** creates simulated multi-omics matrices and their covariance/correlation structure.
-- **Outcome generation** creates the phenotype/response after the simulated omics matrices exist.
-- **Microbiome two-stage emission** changes how sparse microbiome-like features are emitted, but it is still part of null feature generation.
+- **Null feature generation** creates realistic multi-view feature matrices:
+  each feature's distribution, the dependence within each view, and the
+  dependence between views.
+- **Outcome generation** plants an outcome with known drivers *after* the
+  features exist (`gen_simmba()`).
+- **Mediation generation** lets an exposure act on chosen features *before*
+  they are mapped to the data scale, and then generates an outcome from them
+  (`gen_mediation()`).
 
-The most important conceptual point is:
-
-```text
-crosstalk controls cross-view feature dependence.
-outcome generation controls what predicts Y.
-```
-
-High crosstalk means the omics layers share more latent structure. It does not automatically mean that fusion must outperform single-layer or simpler models. Fusion performance depends on how the outcome is generated and whether signal is complementary, shared, redundant, nonlinear, or concentrated in one layer.
+Crosstalk controls only cross-view feature dependence; the outcome model
+controls what predicts the outcome. High crosstalk does not by itself make
+integration methods better: that depends on how the signal is distributed
+across views.
 
 ## 1. Notation
 
-Assume `M` omics views. For view `m`:
+| Symbol | Meaning |
+|---|---|
+| $M$ | number of views, indexed by $m$ |
+| $n_0$, $n$ | number of template samples (after matching), number of simulated samples |
+| $p_{0m}$, $p_m$ | template and simulated feature counts of view $m$ |
+| $X_m \in \mathbb{R}^{n_0 \times p_{0m}}$ | template matrix of view $m$ on the *fitted* scale (after transform, imputation and filtering) |
+| $Q_{mj}$ | empirical quantile function of feature $j$ of view $m$ |
+| $Z_m$ | normal scores of $X_m$ |
+| $k_m$ | within-view rank (number of factors) |
+| $\Lambda_m \in \mathbb{R}^{p_{0m} \times k_m}$ | within-view loadings; $\Lambda_{mj}$ is the row of feature $j$; $h_{mj} = \lVert\Lambda_{mj}\rVert^2$ its communality |
+| $F_m \in \mathbb{R}^{n_0 \times k_m}$ | template factor scores, $F_m^\top F_m/(n_0-1) = I$ |
+| $r$ | shared rank (number of shared cross-view variates) |
+| $S \in \mathbb{R}^{n_0 \times r}$ | template shared variates, $S^\top S/(n_0-1) = I$ |
+| $B_m \in \mathbb{R}^{k_m \times r}$ | cross-view loadings, $B_m = F_m^\top S/(n_0-1)$ |
+| $\gamma_m$ | crosstalk weight of view $m$ |
+| $s \sim N(0, I_r)$, $f_m$, $z_{mj}$ | simulated shared variates, view factors and latent feature scores |
+| $\Phi$, $\Phi^{-1}$ | standard normal CDF and quantile function |
+| $\mathrm{std}(v)$ | $v$ centred and scaled to standard deviation 1 |
 
-```text
-X_m is an n x p_m matrix.
-```
+## 2. Input and preparation
 
-Where:
+### 2.1 Containers
 
-- `n` is the simulated sample size.
-- `p_m` is the number of simulated features in view `m`.
-- `X_m[i, j]` is feature `j` in view `m` for sample `i`.
-
-The complete simulated feature matrix is:
-
-```text
-X = [X_1, X_2, ..., X_M].
-```
-
-MimeSys fits a reusable template from empirical data. The template stores:
-
-- empirical feature marginals,
-- normal-score transformed features,
-- within-view factor loadings,
-- within-view factor scores,
-- shared cross-view latent factors,
-- mappings from shared latent factors into each view,
-- optional two-stage emission parameters for sparse microbiome-like views.
-
-## 2. Fitting the Template
-
-### 2.1 Input
-
-The input is a `MultiAssayExperiment`, a single `SummarizedExperiment`, or a
-named list of matched omics matrices:
-
-```r
-template <- list(
-  CYTOF = cytof_matrix,
-  Metabolomics = metabolomics_matrix,
-  Proteomics = proteomics_matrix
-)
-```
-
-Internally every view is a numeric matrix with samples in rows and features in
-columns; MAE and SummarizedExperiment assays (features in rows) are transposed,
-including MAE experiments stored as plain matrices. Missing row names become
-`sample_1, ...`, missing feature names `<view>_feature_1, ...`, and duplicated
-feature names are made unique. `validate_mimesys_input()` reports samples,
-features, missing values and constant features per view before fitting.
+The input is a `MultiAssayExperiment` (MAE), a single `SummarizedExperiment`,
+or a named list of matrices. Internally every view is a numeric matrix with
+**samples in rows and features in columns**; MAE and SummarizedExperiment
+assays (features in rows) are transposed, including MAE experiments stored as
+plain matrices. Missing row names become `sample_1, sample_2, ...`, missing
+feature names `<view>_feature_1, ...`, and duplicated feature names are made
+unique. `validate_mimesys_input()` reports samples, features, missing values
+and constant features per view before fitting.
 
 ### 2.2 Sample matching
 
-For an MAE, each experiment's column names are first replaced by the primary
-sample IDs of its `sampleMap()`, so experiments that name the same subject
+For an MAE, each experiment's column names are replaced by the primary sample
+IDs of its `sampleMap()`, so experiments that name the same subject
 differently are still matched (several columns for one primary sample are an
-error). MimeSys then intersects the sample IDs across views and keeps only the
-samples shared by all views; at least 10 are required, and duplicate IDs within
-a view are an error.
+error). The samples used are the intersection of the sample IDs of all views:
 
-Because missing row names are filled with `sample_1, sample_2, ...`, a list of
-matrices without row names is matched by position. If such views have
-different numbers of rows, only the first `min(n_m)` rows are kept, without a
-warning, so give matrices explicit sample IDs.
+$$\mathcal{I} = \bigcap_{m=1}^{M} \mathrm{rownames}(X_m), \qquad n_0 = \lvert\mathcal{I}\rvert \ge 10 .$$
 
-The template assumes one sample per subject. For repeated measures, fit the
-template on one timepoint: all 150 samples of the full Stelzer data (3
-timepoints for 53 subjects) give 18 shared factors, one timepoint gives 2.
+Duplicate IDs within a view are an error. A list of matrices without row names
+is matched by position (all views receive `sample_1, ...`); if such views have
+different numbers of rows, only the first $\min_m n_m$ rows are kept, so give
+matrices explicit sample IDs.
 
-### 2.3 Optional view transformation
+The template assumes **one sample per subject**. Repeated measures are not
+independent and inflate the estimated cross-view structure: all 150 samples of
+the full Stelzer data (3 timepoints for 53 subjects) give 18 shared factors,
+one timepoint per subject gives 2.
 
-Before fitting, views can be transformed using `view.transform`.
+### 2.3 Missing values and constant features
 
-Supported choices include:
+Per view: features missing in every sample are dropped (with a message);
+features more than 50% missing give a warning; remaining missing values are
+replaced by the feature median, $x_{ij} \leftarrow \mathrm{median}_i(x_{ij})$;
+constant features are dropped. A view with no non-constant features is an
+error.
 
-- `"none"`: no transformation,
-- `"log1p"`: apply `log(1 + x)`,
-- `"clr"`: centered log-ratio style transformation for compositional data.
+### 2.4 View transforms
 
-`log1p` adds a shift `|min(x)| + 1` first when the view has values below -1;
-`clr` requires non-negative data and uses half the smallest positive value as
-pseudocount. Unknown view names are errors; unnamed views use `"none"`.
+`view.transform` is `"none"`, `"log1p"` or `"clr"` per view (unnamed views
+use `"none"`; unknown view names are errors).
+
+**log1p.** With $x_{\min}$ the smallest value of the view,
+
+$$\tilde x_{ij} = \log(1 + x_{ij} + c), \qquad c = \begin{cases} \lvert x_{\min}\rvert + 1 & x_{\min} < -1,\\ 0 & \text{otherwise.}\end{cases}$$
+
+**Centred log-ratio.** The view must be non-negative. With pseudocount
+$\epsilon$ equal to half the smallest positive value of the view,
+
+$$\tilde x_{ij} = \log(x_{ij} + \epsilon) - \frac{1}{p}\sum_{l=1}^{p}\log(x_{il} + \epsilon).$$
 
 The template is fitted, calibrated and validated on the transformed
-("fitted") scale, and every simulator returns that scale by default. With
-`back.transform = TRUE` (`null_model$back_transform` in the MAE wrappers), each
-simulated feature's uniform is mapped through the feature's original-scale
-empirical quantile function instead: ranks are kept exactly and each feature
-recovers its original marginal (for `clr`, including its zeros). For `log1p`
-this agrees with `expm1()` of the fitted value at observed values but
-interpolates on the original scale between them. Two-part views fitted with
-`log1p` use the exact inverse `exp(x) - 1 - shift`.
-
-### 2.4 Missing values
-
-Features missing in every sample are dropped (with a message), features more
-than 50% missing give a warning, and the remaining missing values are
-median-imputed within each feature:
+("fitted") scale. For transformed views it also keeps each feature's
+original-scale sorted values so that simulations can be returned on the
+measurement scale (Section 4.7).
 
-```text
-median(x_j, na.rm = TRUE).
-```
-
-### 2.5 Constant features
-
-Features with no variation are removed. A constant feature cannot contribute to correlation, factor structure, or outcome signal.
-
-### 2.6 Empirical quantile functions
-
-For each feature, MimeSys stores the sorted empirical values:
-
-```text
-Q_j.
-```
-
-This stored empirical quantile function is later used to map simulated normal-score values back to the empirical scale.
-
-For integer-like features, MimeSys records that the feature is discrete. Discrete features use step-function quantile mapping so that simulated values remain integer-like.
-
-### 2.7 Normal-score transformation
-
-Each empirical feature is converted to normal scores:
-
-```text
-z_ij = Phi^{-1}(rank(x_ij) / (n0 + 1)).
-```
-
-Where:
-
-- `n0` is the template sample size,
-- `Phi^{-1}` is the standard normal quantile function,
-- randomized tie handling is used to deal with zeros and repeated values.
-
-The normal-score matrix for view `m` is:
-
-```text
-Z_m.
-```
-
-### 2.8 Within-view factor model
-
-For each view, MimeSys fits a low-rank factor model on `Z_m`:
-
-```text
-Z_m approx F_m Lambda_m^T + residual noise.
-```
-
-Where:
-
-- `F_m` is the sample-by-factor score matrix for view `m`,
-- `Lambda_m` is the feature-by-factor loading matrix,
-- `k_m` is the number of within-view factors.
-
-This is obtained through truncated SVD.
-
-### 2.9 How within-view rank is chosen
-
-MimeSys does **not** use `2 log(p)` by default.
-
-If the user supplies:
-
-```r
-rank = K
-```
-
-then `K` factors are used per view, or the supplied vector is recycled/matched across views.
-
-If:
-
-```r
-rank = NULL
-```
-
-MimeSys chooses the smallest rank explaining at least `var.explained` of the normal-score variance:
-
-```text
-k_m = smallest k such that cumulative variance explained >= var.explained.
-```
-
-Then this is capped by:
-
-```text
-max.rank = floor(n0 / 3)
-```
-
-unless the user supplies a different `max.rank`.
-
-Therefore:
-
-```text
-k_m = min(rank needed for var.explained, max.rank, p_m - 1).
-```
-
-### 2.10 Loading stabilization
-
-For each feature:
-
-```text
-h_j = ||Lambda_m[j, ]||^2.
-```
-
-If:
-
-```text
-h_j > 0.99,
-```
-
-MimeSys shrinks that loading row so the residual variance remains positive.
-
-This prevents invalid residual variance when simulating new normal-score data.
-
-### 2.11 Shared cross-view latent space
-
-After fitting each view, MimeSys stacks the within-view factor scores:
-
-```text
-F_all = [F_1, F_2, ..., F_M].
-```
-
-It computes:
-
-```text
-cor(F_all)
-```
-
-and performs an eigen decomposition. The leading eigenvectors define the shared cross-view latent structure, similar to a MAXVAR/generalized CCA representation.
-
-### 2.12 How shared rank is chosen
-
-MimeSys does **not** use `2 log(p)` for the shared rank either.
-
-If the user supplies:
-
-```r
-shared.rank = r
-```
-
-then MimeSys uses exactly `r` shared factors.
-
-If:
-
-```r
-shared.rank = NULL
-```
-
-MimeSys estimates the number of shared factors by sequential (deflated)
-permutation-based parallel analysis. Starting from the view score matrices
-`F_1, ..., F_M` and `k = 0`:
-
-1. Compute the largest eigenvalue `lambda_obs` of `cor([F_1, ..., F_M])`.
-2. Independently permute sample labels within each view's current score
-   matrix and recompute the largest eigenvalue; repeat `nperm` times.
-3. The step p-value is `(1 + #{lambda_null >= lambda_obs}) / (nperm + 1)`.
-4. If `p >= 0.05`, stop: `shared.rank = k`.
-5. Otherwise set `k = k + 1`, take the leading shared variate
-   `s = [F_1, ..., F_M] v_1` (standardized), regress `s` out of every view's
-   scores, re-orthonormalize each view's residual scores (dropping the one
-   dimension removed), and go back to step 1.
-
-The procedure also stops when `k` reaches the smallest within-view rank. If the
-first step is not significant, then:
-
-```text
-shared.rank = 0.
-```
-
-Testing each step against the null of the *largest* eigenvalue, after removing
-the directions already accepted, is what makes the test valid. The classical
-variant that compares the `k`-th observed eigenvalue with the null of the
-`k`-th permuted eigenvalue over-selects here: a real shared factor lifts every
-later observed eigenvalue above its permuted counterpart. In simulations with
-2, 3 and 5 true shared factors, the index-matched test chose 6-15, while the
-sequential test recovered the truth in most runs (at small `n` it occasionally
-picks one factor too many, because the deflated direction is estimated).
-
-The shared loadings `B_m` are taken from the top `shared.rank` eigenvectors of
-the original `cor(F_all)`. The step p-values, the 95th percentile of each
-step's null (`gcca.threshold`) and the tested eigenvalues (`gcca.step.eigen`)
-are stored in the template, and a warning flags a borderline choice (last
-accepted step with p > 0.025, or first rejected step with p < 0.08).
-
-**Stability selection (optional).** The normal scores use random tie-breaking
-and the null uses random permutations, so a borderline rank can vary between
-runs. With `shared.rank.runs = R > 1` (default 1), the whole selection (normal
-scores, factor models and parallel analysis) is repeated `R` times and
-
-```text
-shared.rank = round(mean(r_1, ..., r_R)),
-```
-
-capped at the smallest within-view rank. The runs, their distribution and the
-share of runs equal to the chosen rank are stored in
-`shared.rank.selection`; a message is shown when fewer than half agree.
-
-### 2.13 Shared factor scores
-
-If `shared.rank > 0`, MimeSys constructs:
-
-```text
-S in R^(n0 x r).
-```
-
-This is obtained by projecting the stacked factor scores onto the leading shared eigenvectors, then orthonormalizing and scaling the scores.
-
-### 2.14 View-specific shared loading matrices
-
-For each view:
-
-```text
-B_m = F_m^T S / (n0 - 1).
-```
-
-`B_m` maps the shared latent factors into view `m`'s within-view factor space.
-
-The template therefore contains:
-
-```text
-Lambda_m  : feature loadings within view m
-F_m       : within-view factor scores
-S         : shared latent scores
-B_m       : map from shared factors to view m
-Q_j       : empirical feature quantile functions
-```
-
-## 3. Null Multi-Omics Feature Generation
-
-### 3.1 Goal
-
-Generate synthetic omics matrices that preserve:
-
-- empirical marginal distributions,
-- within-view dependence,
-- cross-view dependence,
-- optional sparse/zero-inflated microbiome behavior.
-
-This is where `crosstalk` operates.
-
-### 3.2 Feature count handling
-
-For each view, requested feature count `p_m` can be:
-
-- `NULL`: keep the template feature count,
-- a scalar: same feature count for every view,
-- a vector: view-specific feature counts.
-
-### 3.3 If requested features are fewer than template features
-
-If:
-
-```text
-p_m <= p0_m,
-```
-
-MimeSys selects parent features from the template.
-
-Selection can be:
-
-- `"random"`: random subset,
-- `"variance"`: highest-variance features first (on the fitted scale, after any `view.transform`).
-
-The selected parent feature supplies:
-
-- empirical marginal distribution,
-- loading vector,
-- two-stage emission parameters if relevant.
-
-### 3.4 If requested features exceed template features
-
-If:
-
-```text
-p_m > p0_m,
-```
-
-MimeSys creates offspring features.
-
-Each offspring feature copies a parent marginal distribution but receives perturbed loadings:
-
-```text
-Lambda_offspring =
-  sqrt(1 - feature.jitter) Lambda_parent
-  + sqrt(feature.jitter) Lambda_other.
-```
-
-Interpretation:
-
-- small `feature.jitter`: offspring closely resembles the parent,
-- large `feature.jitter`: offspring is more perturbed.
-
-### 3.5 Crosstalk
-
-For view `m`, crosstalk is:
-
-```text
-gamma_m.
-```
-
-It controls how strongly the simulated within-view factor scores are driven by the shared latent factors.
-
-In the factor simulator:
-
-```text
-f_m = sqrt(gamma_m) S_new B_m^T
-      + E_m sqrt(I - gamma_m B_m B_m^T).
-```
-
-Where:
-
-- `f_m` is the simulated factor score matrix for view `m`,
-- `S_new` is the simulated shared latent matrix,
-- `B_m` is the template-estimated map from shared factors to view `m`,
-- `E_m` is independent view-specific Gaussian noise,
-- the square-root residual term preserves valid covariance.
-
-### 3.6 Crosstalk interpretation
-
-If:
-
-```text
-gamma_m = 0,
-```
-
-then:
-
-```text
-f_m = E_m.
-```
-
-The view has no shared latent component.
-
-If:
-
-```text
-gamma_m = 1,
-```
-
-the view uses the fitted template-level shared structure.
-
-If:
-
-```text
-0 < gamma_m < 1,
-```
-
-the view partially uses the shared structure.
-
-If valid values above 1 are allowed, they amplify the shared structure beyond the fitted template level.
-
-### 3.7 Valid crosstalk range
-
-MimeSys requires:
-
-```text
-I - gamma_m B_m B_m^T
-```
-
-to remain positive semidefinite.
-
-Therefore:
-
-```text
-gamma_m <= 1 / sigma_max(B_m)^2.
-```
-
-This is what `crosstalk_max(template)` computes.
-
-### 3.8 Cross-view covariance induced by crosstalk
-
-For two views `m` and `m'`:
-
-```text
-Cov(f_m, f_m') = sqrt(gamma_m gamma_m') B_m B_m'^T.
-```
-
-So crosstalk directly scales cross-view latent covariance.
-
-This is why increasing crosstalk generally increases cross-view feature correlation.
-
-### 3.9 Simulate shared latent factors
-
-For the factor simulator:
-
-```text
-S_new ~ N(0, I_r).
-```
-
-Rows are samples and columns are shared latent factors.
-
-If `r = 0`, there are no shared factors.
-
-### 3.10 Simulate private view-specific factors
-
-For each view:
-
-```text
-E_m ~ N(0, I_{k_m}).
-```
-
-Then:
-
-```text
-f_m = shared component + private component.
-```
-
-### 3.11 Generate latent normal-score features
-
-For view `m`:
-
-```text
-Z_m = f_m Lambda_m^T + epsilon_m.
-```
-
-For feature `j`:
-
-```text
-epsilon_ij ~ N(0, psi_j),
-psi_j = 1 - ||Lambda_m[j, ]||^2.
-```
-
-### 3.12 Map latent features to empirical scale
-
-The latent normal-score values are converted to uniforms:
-
-```text
-U_mj = Phi(Z_mj).
-```
-
-Then they are mapped through the empirical quantile function:
-
-```text
-X_mj = Q_mj(U_mj).
-```
+## 3. Fitting the template
 
-This preserves feature-specific skewness, discreteness, bounds, and empirical marginal behavior.
+`fit_template()` learns the three ingredients of the generative model of
+Section 4: the marginals $Q_{mj}$, the within-view loadings $\Lambda_m$, and
+the cross-view loadings $B_m$.
 
-## 4. Microbiome Two-Stage Emission
+### 3.1 Marginals: empirical quantile functions
 
-### 4.1 Goal
+For feature $j$ the sorted template values $x_{(1)} \le \dots \le x_{(n_0)}$
+are stored. A uniform $u \in (0,1)$ is mapped to data by
 
-Generate sparse, zero-inflated microbiome-like data while preserving dependence through the latent simulator.
+$$Q(u) = \begin{cases} x_{(\lceil u\, n_0 \rceil)} & \text{integer-valued feature},\\[4pt] x_{(\lfloor h \rfloor)} + (h - \lfloor h\rfloor)\big(x_{(\lfloor h\rfloor + 1)} - x_{(\lfloor h \rfloor)}\big) & \text{otherwise,}\end{cases} \qquad h = (n_0 - 1)u + 1 ,$$
 
-This is part of null feature generation. It is not an outcome model.
+a step function for integer-valued features (so counts stay integers) and
+linear interpolation otherwise.
 
-### 4.2 When used
+A feature is integer-valued when all its values are within $10^{-8}$ of an
+integer. Zeros, point masses, bounds, skewness and heavy tails therefore carry
+over exactly, and simulated values never leave the observed range.
 
-For example:
+### 3.2 Normal scores
 
-```r
-view.models = c(Microbiome = "two_part_copula")
-```
-
-Then the microbiome view uses a two-stage emission model.
-
-### 4.3 Stage 1: presence/absence
-
-For feature `j`, MimeSys generates a latent presence variable:
-
-```text
-Z_presence_ij.
-```
-
-Then:
-
-```text
-U_presence_ij = Phi(Z_presence_ij).
-```
-
-The empirical zero fraction from the template determines a threshold. Conceptually:
-
-```text
-A_ij = 1 if U_presence_ij exceeds the zero threshold,
-       0 otherwise.
-```
-
-If:
-
-```text
-A_ij = 0,
-```
-
-the emitted value is zero.
-
-### 4.4 Stage 2: positive abundance
-
-For present features:
+Each feature is converted to normal scores by a randomized probability
+integral transform,
 
-```text
-A_ij = 1,
-```
-
-MimeSys generates a second latent abundance variable, a lightly perturbed copy
-of the presence variable:
-
-```text
-Z_abundance_ij = (Z_presence_ij + N(0, 0.15^2)) / sqrt(1 + 0.15^2),
-U_abundance_ij = Phi(Z_abundance_ij).
-```
-
-The rescaling keeps `Z_abundance_ij` standard normal, so `U_abundance_ij` is
-exactly uniform. The two-part model is for sparse non-negative abundances
-only: a view with negative values, or fitted on the CLR scale (which has no
-zeros), is an error.
-
-Because a present feature already has `U_presence_ij > pi_j`, the abundance
-uniform is rescaled to the part of `(0, 1)` above the zero probability before
-it is mapped through the positive-value quantile function:
-
-```text
-U*_ij = (U_abundance_ij - pi_j) / (1 - pi_j),
-V_ij  = Q_positive_j(U*_ij).
-```
+$$z_{ij} = \Phi^{-1}\!\left(\frac{\mathrm{rank}(x_{ij})}{n_0 + 1}\right),$$
 
-Without this conditioning, present features would draw only from the upper
-quantiles of their positive distribution and abundances would be inflated.
+with ties broken at random, and each column is then centred and scaled to unit
+variance. Random tie-breaking spreads a point mass (for example many zeros)
+over a range of normal scores, so tied features still have well-defined
+latent correlations; it is also why template fitting uses a seed.
 
-### 4.5 Final microbiome value
+### 3.3 Within-view factor model
 
-The observed value is:
+For view $m$, with the singular value decomposition $Z_m = U D V^\top$ and its
+leading $k_m$ triplets $(U_k, D_k, V_k)$,
 
-```text
-X_ij = A_ij V_ij.
-```
-
-So:
+$$\Lambda_m = \frac{V_k D_k}{\sqrt{n_0 - 1}}, \qquad F_m = U_k\sqrt{n_0-1}, \qquad Z_m \approx F_m\Lambda_m^\top .$$
 
-- if `A_ij = 0`, then `X_ij = 0`,
-- if `A_ij = 1`, then `X_ij` is positive and drawn from the empirical positive-value distribution.
+The scores have identity sample covariance and $\Lambda_{mj}$ is the vector of
+correlations between feature $j$ and the factors.
 
-Composition views never exceed the template total. If every template sample
-sums to the same total (a closed composition, such as relative abundances
-summing to 1) and at least the template's features are simulated, including
-offspring features, every simulated sample is renormalized to that total, so
-offspring features dilute the others. If fewer features are simulated, samples
-above the total are scaled down to it. If the template is itself a subset of a
-composition (values in [0, 1] with sample totals at most 1), samples above the
-largest observed total are scaled down to it. Other views are unconstrained.
-
-With total `T` and simulated sample total `t_i`:
-
-```text
-closed, p >= p0:     X_i <- X_i * T / t_i
-otherwise:           X_i <- X_i * min(1, T / t_i)
-```
+**Rank.** With $d_l$ the singular values,
 
-### 4.6 Relationship to crosstalk
+$$k^\ast = \begin{cases} \min\Big\{k : \sum_{l \le k} d_l^2 \big/ \sum_l d_l^2 \ \ge\ v\Big\} & \texttt{rank = NULL},\\[4pt] \lceil 2\log p_{0m}\rceil & \texttt{rank = "2logp"},\\[2pt] \texttt{rank}_m & \text{given},\end{cases}$$
 
-Crosstalk still acts upstream on the latent variables. The two-stage model changes how latent variables are emitted as observed features.
+with $v =$ `var.explained` (default 0.7),
 
-### 4.7 Relationship to outcome generation
+and $k_m = \max\{1, \min(k^\ast, \texttt{max.rank}, p_{0m} - 1)\}$ with
+`max.rank` $= \max(1, \lfloor n_0/3\rfloor)$ by default; the cap also applies to
+an explicit rank.
 
-After microbiome features are generated, any outcome mode can be used:
+**Communality cap.** If $h_{mj} = \lVert\Lambda_{mj}\rVert^2 > 0.99$, the row is
+rescaled, $\Lambda_{mj} \leftarrow \Lambda_{mj}\sqrt{0.99/h_{mj}}$, so every
+feature keeps at least 1% unique variance.
 
-- `LM`,
-- `Friedman`,
-- `Friedman2`,
-- `SharedLatent` with `linear`,
-- `SharedLatent` with `friedman`,
-- `SharedLatent` with `friedman2`.
+### 3.4 Shared cross-view space (MAXVAR generalized CCA)
 
-## 5. Spike-In Coefficients
+Stack the view scores, $F = [F_1, \dots, F_M]$, and take the eigendecomposition
+of their correlation matrix,
 
-### 5.1 Goal
+$$C = \mathrm{Cor}(F) = W\,\Omega\,W^\top, \qquad \omega_1 \ge \omega_2 \ge \dots$$
 
-Create feature-level beta effects for observed-feature outcome modes.
+Because each $F_m$ is orthonormal, the diagonal blocks of $C$ are identities
+and the off-diagonal blocks are the cross-correlation matrices between views'
+factor scores.
 
-These effects are used by:
+**What the eigenvalues mean.** Let $P_m = F_m F_m^\top/(n_0-1)$, the projection
+onto view $m$'s factor space. The non-zero eigenvalues of $C$ are those of
+$\sum_m P_m$, and for a standardized variate $s$ in the stacked score space
 
-- `LM`,
-- `Friedman`,
-- `Friedman2`.
+$$\frac{s^\top\big(\sum_m P_m\big)s}{s^\top s} = \sum_{m=1}^{M} R^2(s \mid F_m),$$
 
-They are also stored when using `SharedLatent`, but `SharedLatent` generates the final outcome from shared factors instead of observed-feature betas.
+the sum over views of the squared multiple correlation of $s$ with each view's
+factors. The leading eigenvector is therefore the variate best explained by
+all views together (the MAXVAR criterion), and its eigenvalue is that summed
+$R^2$: at most $M$, and about 1 for a direction that lives in one view only.
+For two views the eigenvalues are $1 \pm \rho_i$, with $\rho_i$ the canonical
+correlations between the two sets of factor scores.
 
-### 5.2 Number of nonzero effects
+**Shared variates and loadings.** For a shared rank $r > 0$, the shared
+variates are the standardized projections $S = \mathrm{std}(F W_{1:r})$,
+orthonormalized by a QR decomposition and scaled so that $S^\top S/(n_0-1) = I_r$.
+The cross-view loadings are
 
-For each view:
+$$B_m = \frac{F_m^\top S}{n_0 - 1} \qquad (k_m \times r),$$
 
-```text
-n_de_m ~ Binomial(p_m, de.prob_m).
-```
+the regression coefficients of the shared variates on view $m$'s factors.
+Column $l$ has squared norm $R^2(S_l \mid F_m) \le 1$; more generally
+$B_m^\top B_m = S^\top P_m S/(n_0-1) \preceq I$, so $\sigma_{\max}(B_m) \le 1$.
+The per-sample scores $F_m$ are discarded after fitting.
 
-If `de.prob_m > 0` and the draw gives `n_de_m = 0`, it is set to 1, so every
-view with a positive `de.prob` carries at least one nonzero effect. With
-`de.prob_m = 0`, all effects in that view are zero.
+### 3.5 Choosing the shared rank: sequential parallel analysis
 
-### 5.3 Effect magnitudes
+With `shared.rank = NULL`, $r$ is chosen by a sequential (deflated) permutation
+test. Start with $F_m^{(0)} = F_m$ and $r = 0$:
 
-For each selected feature:
+1. Compute the largest eigenvalue $\lambda_{\mathrm{obs}}$ of
+   $\mathrm{Cor}([F_1^{(r)}, \dots, F_M^{(r)}])$.
+2. For $b = 1, \dots, B$ (`nperm`, default 200), permute the rows of each
+   view's score matrix independently (this destroys cross-view dependence but
+   keeps within-view structure) and record the largest eigenvalue
+   $\lambda^{(b)}$.
+3. Compute the step p-value and the 95% null threshold:
 
-```text
-fac_j ~ LogNormal(de.facLoc_m, de.facScale_m).
-```
+   $$p_{r+1} = \frac{1 + \#\{b : \lambda^{(b)} \ge \lambda_{\mathrm{obs}}\}}{B + 1}, \qquad t_{r+1} = \mathrm{quantile}_{0.95}\big(\lambda^{(1)},\dots,\lambda^{(B)}\big).$$
+
+4. If $p_{r+1} \ge 0.05$, stop: the shared rank is $r$.
+5. Otherwise set $r \leftarrow r + 1$ and **deflate**: with $v$ the leading
+   eigenvector, form $\hat s = \mathrm{std}\big([F_1^{(r-1)},\dots,F_M^{(r-1)}]\,v\big)$,
+   remove it from every view,
+
+   $$F_m \leftarrow F_m - \hat s\,\frac{\hat s^\top F_m}{\hat s^\top \hat s},$$
+
+   and re-orthonormalize each view by keeping all but one of its left
+   singular vectors (scaled by $\sqrt{n_0-1}$). Go back to step 1.
+
+The loop also stops when $r$ reaches $\min_m k_m$. The p-values, thresholds
+and tested eigenvalues are stored as `gcca.pvalue`, `gcca.threshold` and
+`gcca.step.eigen`; $B_m$ is then taken from the leading $r$ eigenvectors of the
+original $C$.
+
+**Why sequential.** The classical rule compares the $k$-th observed eigenvalue
+with the null of the $k$-th permuted eigenvalue. Once one real shared factor
+exists, every later observed eigenvalue is lifted above its permuted
+counterpart, so that rule over-selects: in simulations with 2, 3 and 5 true
+shared factors it chose 6 to 15. The correct sequential test compares the
+*largest remaining* eigenvalue with the null of the *largest* eigenvalue after
+removing the accepted factors. It recovers the true rank in most runs (with
+one true factor and $n_0 = 100$ it picks one too many in about 10% of runs,
+slightly above the nominal 5%, because the deflated direction is estimated).
+
+**Borderline warning.** A warning is given when the last accepted step has
+$p > 0.025$ or the first rejected step has $p < 0.08$.
+
+**Stability selection (optional).** With `shared.rank.runs` $= R > 1$, the
+whole fit (with fresh tie-breaking and permutations) is repeated and
+$r = \mathrm{round}\big(\tfrac1R\sum_b r_b\big)$; the runs are stored in
+`shared.rank.selection`. An explicit `shared.rank` larger than $\min_m k_m$ is
+an error.
+
+### 3.6 Two-part summaries and composition type
+
+For each feature the fit stores its zero probability
+$\pi_j = \frac{1}{n_0}\sum_i \mathbf{1}(x_{ij} \le 0)$ and the sorted positive
+values (the conditional quantile function $Q^{+}_j$ given presence), used by
+the two-part model (Section 4.5).
+
+Each view is classified on its original scale as
+
+- **closed**: non-negative with constant row totals,
+  $\mathrm{sd}(\sum_j x_{ij}) \le 10^{-6}\,\mathrm{mean}(\sum_j x_{ij})$; total
+  $\tau$ stored (e.g. relative abundances summing to 1);
+- **proportion**: all values in $[0,1]$, row totals at most 1 and more than one
+  feature (a subset of a composition); $\tau = \max_i \sum_j x_{ij}$;
+- **none** otherwise.
+
+### 3.7 What the template stores
+
+Per view: sorted values (fitted and, for transformed views, original scale),
+integer flags, composition type, two-part summaries, $\Lambda_m$, $k_m$ and
+feature variances. Overall: the fitted matrices (`observed`, used by
+calibration and validation), $B_m$, $r$, the GCCA and parallel-analysis
+summaries, the transforms and the provenance. Because it keeps the fitted
+matrices and every feature's values, a template is as sensitive as the source
+data.
+
+## 4. Null multi-omics feature generation
+
+`sim_from_template()` generates data with the template's marginals and
+dependence and no planted signal. Every other simulator uses the same engine.
+
+### 4.1 The generative model
+
+For each simulated sample, with independent $s \sim N(0, I_r)$,
+$\epsilon_m \sim N(0, I_{k_m})$ and $e_{mj} \sim N(0, 1)$:
+
+$$\begin{aligned}
+f_m &= \sqrt{\gamma_m}\,B_m s + \big(I - \gamma_m B_m B_m^\top\big)^{1/2}\epsilon_m, \\
+z_{mj} &= \Lambda_{mj} f_m + \sqrt{\psi_{mj}}\;e_{mj}, \qquad \psi_{mj} = 1 - \lVert\Lambda_{mj}\rVert^2, \\
+x_{mj} &= Q_{mj}\big(\Phi(z_{mj})\big).
+\end{aligned}$$
+
+This is a Gaussian copula with a low-rank factor structure: dependence is
+defined on the latent normal scale, and each feature is then given its own
+empirical marginal. The matrix square root is computed from an
+eigendecomposition with negative eigenvalues set to 0. If $r = 0$ or
+$\gamma_m = 0$, $f_m = \epsilon_m$.
+
+### 4.2 Properties: why crosstalk is a clean dial
+
+**Proposition.** For $\gamma_m \le 1/\sigma_{\max}(B_m)^2$,
+
+$$\mathrm{Var}(f_m) = I_{k_m}, \qquad \mathrm{Cov}(f_m, f_{m'}) = \sqrt{\gamma_m\gamma_{m'}}\;B_m B_{m'}^\top \ (m \ne m'), \qquad \mathrm{Var}(z_{mj}) = 1 .$$
+
+*Proof.* $\mathrm{Var}(f_m) = \gamma_m B_m B_m^\top + (I - \gamma_m B_m B_m^\top) = I$; the
+square root exists exactly when $I - \gamma_m B_m B_m^\top \succeq 0$, i.e.
+$\gamma_m\,\sigma_{\max}(B_m)^2 \le 1$. The cross-covariance involves only the
+shared parts because the $\epsilon$'s are independent. Finally
+$\mathrm{Var}(z_{mj}) = \Lambda_{mj}\Lambda_{mj}^\top + \psi_{mj} = 1$. $\square$
+
+Consequences:
+
+1. **Marginals never change.** $\Phi(z_{mj})$ is exactly uniform, so $x_{mj}$
+   follows the template's empirical quantile function for any crosstalk,
+   sample size or feature count (except for the composition step of
+   Section 4.6).
+2. **Within-view structure does not depend on crosstalk.** For features $i
+   \ne j$ of the same view, $\mathrm{Cor}(z_{mi}, z_{mj}) = \Lambda_{mi}\Lambda_{mj}^\top$.
+3. **Cross-view latent correlations scale with crosstalk.** For feature $i$ of
+   view $m$ and $j$ of view $m'$,
+
+   $$\mathrm{Cor}(z_{mi}, z_{m'j}) = \sqrt{\gamma_m\gamma_{m'}}\;\Lambda_{mi}B_mB_{m'}^\top\Lambda_{m'j}^\top .$$
+
+   With a common $\gamma$, the whole cross-view correlation matrix is
+   multiplied by $\gamma$. At $\gamma = 1$,
+   $B_mB_{m'}^\top = F_m^\top SS^\top F_{m'}/(n_0-1)^2$ is the template's
+   cross-covariance of factor scores projected onto the shared space.
+4. **Valid range.** `crosstalk_max()` returns $1/\sigma_{\max}(B_m)^2$ per view
+   (always at least 1, because $\sigma_{\max}(B_m) \le 1$); values above 1
+   amplify the template's shared structure.
+5. **Canonical correlations.** The latent canonical correlations between views
+   $a$ and $b$ are the singular values of $\sqrt{\gamma_a\gamma_b}\,B_aB_b^\top$
+   (`truth$cancor`).
+6. **From latent to data correlations.** For continuous marginals the rank
+   (Spearman) correlation of the data is $\frac{6}{\pi}\arcsin(\rho/2)$ for a
+   latent correlation $\rho$, close to $\rho$; Pearson correlations of strongly
+   skewed or zero-inflated data are attenuated.
 
-The sign direction is initially sampled using `de.downProb_m`.
+### 4.3 Feature counts
 
-The beta value is:
+**Fewer features than the template** ($p_m \le p_{0m}$): $p_m$ template
+features are chosen at random (`feature.select = "random"`) or those with the
+largest fitted-scale variance (`"variance"`), with their rows of $\Lambda_m$.
 
-```text
-beta_j = log2(effect factor).
-```
+**More features** ($p_m > p_{0m}$): all template features are kept and
+$p_m - p_{0m}$ *offspring* features are added. Each offspring has a parent $j$
+and a partner $l$ (drawn with replacement), copies the parent's marginal
+$Q_{mj}$, and gets loadings
 
-Positive beta means increasing the feature increases the predictor. Negative beta means increasing the feature decreases the predictor.
+$$\Lambda_{\mathrm{off}} = \sqrt{1-\tau}\;\Lambda_{mj} + \sqrt{\tau}\;\Lambda_{ml}, \qquad \tau = \texttt{feature.jitter}\ (\text{default } 0.2),$$
 
-### 5.4 Differential-effect alignment through `de.align`
+with the communality again capped at 0.99. An offspring resembles its parent
+without being a copy.
 
-Each feature has a stored:
+### 4.4 Generating the data
 
-```text
-shared_loading_j.
-```
+All views' latent scores $Z_m = F_m\Lambda_m^\top + E_m\,\mathrm{diag}(\psi_m)^{1/2}$
+are built first; an internal hook can modify them jointly before mapping (the
+mediation simulators use it to let the exposure act and to link features
+across views). Each column is then mapped through its parent's quantile
+function, $x_{ij} = Q_{m,\mathrm{parent}(j)}(\Phi(z_{ij}))$.
 
-This is its loading on the first shared latent direction.
+### 4.5 Two-part model for sparse microbiome views
 
-If:
+With `view.models = c(View = "two_part_copula")`, presence and abundance are
+generated as two linked parts. For feature $j$ with zero probability $\pi_j$:
 
-```r
-de.align = NULL
-```
+$$\begin{aligned}
+\text{present}_{ij} &= \mathbf{1}\big(\Phi(z_{ij}) > \pi_j\big), \\
+z^{\mathrm{ab}}_{ij} &= \frac{z_{ij} + 0.15\,\delta_{ij}}{\sqrt{1 + 0.15^2}}, \qquad \delta_{ij} \sim N(0,1), \\
+u^\ast_{ij} &= \frac{\Phi(z^{\mathrm{ab}}_{ij}) - \pi_j}{1 - \pi_j} \quad \text{clipped to } [10^{-8},\,1 - 10^{-8}], \\
+x_{ij} &= \text{present}_{ij}\cdot Q^{+}_j(u^\ast_{ij}).
+\end{aligned}$$
 
-MimeSys uses independent spike-in positions and signs.
+The share of zeros matches the template exactly. The abundance latent is a
+lightly perturbed copy of the presence latent (correlation $\approx 0.989$),
+rescaled to unit variance so that its uniform is exact. The rescaling of
+$u^\ast$ conditions on presence: a present sample has $\Phi(z) > \pi_j$, so its
+abundance is drawn from the whole positive distribution (without it,
+abundances were inflated about three-fold). The model is for sparse
+non-negative abundances only: views with negative values or fitted on the CLR
+scale are errors.
 
-If:
+### 4.6 Composition constraint
 
-```r
-de.align = a
-```
+For compositional views (Section 3.6) simulated samples never exceed the
+template total $\tau$:
 
-with `0 <= a <= 1`, then:
+$$x_{i\cdot} \leftarrow \begin{cases} \tau\,x_{i\cdot}\big/\textstyle\sum_j x_{ij} & \text{closed, } p_m \ge p_{0m},\\[4pt] x_{i\cdot}\,\min\!\big(1,\ \tau\big/\textstyle\sum_j x_{ij}\big) & \text{closed with } p_m < p_{0m}, \text{ or proportion.}\end{cases}$$
 
-```text
-n_aligned = round(a * n_de_m).
-```
+In the first case an all-zero row puts the whole total $\tau$ on one random
+feature.
 
-MimeSys samples those aligned features with probability proportional to:
+Offspring features in a closed composition therefore dilute the others instead
+of pushing totals above $\tau$. The constraint is applied on the original
+scale.
 
-```text
-shared_loading_j^2.
-```
+### 4.7 Back-transformation
 
-For aligned features:
+With `back.transform = TRUE`, each simulated uniform $u_{ij} = \Phi(z_{ij})$ is
+mapped through the feature's *original-scale* quantile function instead. Ranks
+are kept exactly and each feature recovers its original marginal (for clr,
+including its zeros). For log1p this equals $\exp(\cdot) - 1 - c$ of the
+fitted value at observed values and interpolates on the original scale between
+them. Two-part views fitted with log1p use the exact inverse
+$x = e^{\tilde x} - 1 - c$. The default (`FALSE`) returns the fitted scale,
+which is the scale of calibration, validation and the truth.
 
-```text
-sign(beta_j) = sign(shared_loading_j).
-```
+### 4.8 Output
 
-### 5.5 Interpretation of `de.align`
+`feature_metadata` has, per feature, its ID and view, the parent template
+feature, the offspring flag, the observation model, the returned scale, the
+transform, and the **shared loading**
+$\ell_j = \Lambda_{mj}B_{m,\cdot 1}$, the latent correlation of the feature with
+shared variate 1 at $\gamma = 1$. `truth` holds the simulated factor scores,
+shared variates, crosstalk and canonical correlations.
 
-`de.align` controls whether outcome-relevant observed features point along the shared latent direction.
+## 5. Outcome generation (`gen_simmba()`)
 
-It is separate from crosstalk:
+For each replicate, null data are generated (Section 4), then coefficients,
+a predictor and an outcome; finally the samples are split into training and
+test sets.
 
-- crosstalk controls how views are correlated,
-- `de.align` controls whether beta effects are aligned with that shared direction.
+### 5.1 Standardized features
 
-## 6. View-Level Signal Balancing
+Within each replicate, over all $n$ samples (before the split),
 
-### 6.1 Goal
+$$\tilde x_{ij} = \frac{x_{ij} - \bar x_j}{\mathrm{sd}(x_j)}$$
 
-Control how much each view contributes to the additive observed-feature predictor.
+(constant columns become 0). Coefficients are therefore effects per standard
+deviation, and views on very different measurement scales contribute
+comparably.
 
-The argument is:
+### 5.2 Signal coefficients
 
-```r
-signal.share
-```
+In view $m$ with $p_m$ features, the number of signal features is
 
-### 6.2 View predictors on standardized features
+$$n_m = \max\big\{1,\ \mathrm{Binomial}(p_m,\ \texttt{signal.prob}_m)\big\}$$
 
-Each simulated feature is standardized within the replicate (mean 0, SD 1;
-constant features are set to 0), so coefficients are per-SD effects and views
-measured on very different scales contribute comparably. For each view:
+(0 if `signal.prob`$_m = 0$). For each signal feature,
 
-```text
-eta_m = X~_m beta_m,   X~_m = standardized X_m.
-```
+$$f_j \sim \mathrm{LogNormal}(\mu, \sigma), \qquad d_j = \begin{cases} -1 & \text{with probability } \texttt{signal.neg.prob},\\ +1 & \text{otherwise,}\end{cases} \qquad \beta_j = d_j\,\lvert\log_2 f_j\rvert,$$
 
-### 6.3 Normalizing requested shares
+with $\mu =$ `effect.meanlog` (default 1) and $\sigma =$ `effect.sdlog` (0.4);
+$\beta_j = 0$ for the other features. With the defaults the typical factor is
+$e \approx 2.7$ and $\lvert\beta\rvert \approx 1.4$. (This is the log-normal
+fold-change distribution of the splatter simulator, restricted to the signal
+features.)
 
-If:
+**Alignment.** With `signal.align` $= \alpha \in [0,1]$, $\mathrm{round}(\alpha n_m)$
+of the signal features are drawn with probability proportional to
+$\ell_j^2$ and given the sign of $\ell_j$; the rest are drawn uniformly among
+the remaining features. Signals in different views then agree to the extent
+the views share structure.
 
-```r
-signal.share = c(1, 1, 1)
-```
+### 5.3 Linear predictor and signal balance
 
-MimeSys normalizes this to:
+$$\eta_{im} = \sum_{j \in m}\beta_j\tilde x_{ij}, \qquad \eta^{\mathrm{lin}}_i = \sum_{m=1}^{M}\eta_{im}.$$
 
-```text
-(1/3, 1/3, 1/3).
-```
+With `signal.share` $= (w_1, \dots, w_M)$, normalized to sum to 1, each view's
+coefficients are rescaled so that its predictor has variance $w_m$:
 
-If named values are supplied, they are matched by view name.
+$$\beta_m \leftarrow \beta_m\sqrt{w_m/\mathrm{Var}(\eta_m)}$$
 
-### 6.4 Rescaling beta values
+($w_m = 0$ sets the view's coefficients to 0). For example $(1,1,1)$ gives
+complementary signal of equal size in three views, $(1,0,0)$ puts all linear
+signal in one view. The correlation matrix of the $\eta_m$ is returned as
+`agreement.emp`.
 
-For each view, MimeSys computes:
+### 5.4 Outcome models (`outcome.model`)
 
-```text
-Var(eta_m).
-```
+**Mixing two parts.** Two standardized components $a, b$ are combined as
 
-If this variance is positive, beta values for that view are multiplied by:
+$$\eta = \sqrt{1-w}\;\mathrm{std}(a) + \sqrt{w}\;\mathrm{std}(b),$$
 
-```text
-sqrt(target_share_m / Var(eta_m)).
-```
+so that $\mathrm{Var}(\eta) = 1$ and $w$ is the share of signal variance from
+$b$ when $a$ and $b$ are uncorrelated.
 
-After this:
+| `outcome.model` | Predictor |
+|---|---|
+| `"linear"` | $\eta = \eta^{\mathrm{lin}}$ |
+| `"friedman"` | $\eta = F(u_1,\dots,u_5)$ |
+| `"friedman2"` | mix of $\eta^{\mathrm{lin}}$ and $F$ with $w =$ `nonlinear.weight` (0.5) |
+| `"shared_latent"` | function of the simulated shared variates (below) |
+| `"interaction"` | mix of $\eta^{\mathrm{lin}}$ and $\eta^{\mathrm{int}}$ with $w =$ `interaction.weight` (0.5) |
 
-```text
-Var(eta_m) approximately equals target_share_m.
-```
+**Friedman.** Five signal features $j_1,\dots,j_5$ are chosen (all features if
+fewer than five have signal; with `friedman.share`, each slot first picks a
+view with probability equal to its share). They are rank-transformed to the
+unit interval, $u_{ik} = \mathrm{rank}(x_{ij_k})/(n+1)$, and
 
-### 6.5 Final additive linear predictor
+$$F(u) = 10\sin(\pi u_1u_2) + 20(u_3 - 0.5)^2 + 10u_4 + 5u_5 ,$$
 
-The additive predictor is:
+the Friedman (1991) benchmark function.
 
-```text
-eta_linear = sum_m eta_m.
-```
+**Shared latent.** With $\tilde s_k$ the standardized simulated shared variates
+and $K =$ `shared.latent.n.factors` (default all $r$),
 
-## 7. Outcome Generation Modes
+$$\eta^{\mathrm{SL}} = \mathrm{std}\Big(\frac{1}{\sqrt K}\sum_{k=1}^{K}\tilde s_{ik}\Big) \quad (\texttt{"linear"}), \qquad \eta = \mathrm{std}\,F(v_{i1},\dots,v_{i5}), \ \ v_{ik} = \frac{\mathrm{rank}(\tilde s_{ik})}{n+1} \quad (\texttt{"friedman"}),$$
 
-## 7.1 `ygen.mode = "LM"`
+and `"friedman2"` mixes the two. The outcome then depends on the cross-view
+latent process rather than on individual features; with crosstalk 0 it is
+unrelated to the features (a warning is given).
 
-The outcome signal is:
+**Interaction.** Pairs $(a_t, b_t)$ of features from *different* views
+(`n.interactions`, default one per view pair; signal features preferred) give
 
-```text
-eta = eta_linear = sum_m X_m beta_m.
-```
+$$\eta^{\mathrm{int}}_i = \sum_t \tilde x_{ia_t}\,\tilde x_{ib_t}.$$
 
-This is an additive observed-feature outcome.
+With `interaction.weight = 1` the outcome has no main effects.
 
-## 7.2 `ygen.mode = "Friedman"`
+### 5.5 How the signal controls interact
 
-MimeSys selects five observed simulated features.
+The controls act on different parts of the model and can be combined to
+create benchmarking regimes:
 
-Candidate features are usually nonzero-beta features:
+| Control | Acts on | Effect |
+|---|---|---|
+| `crosstalk` $\gamma$ | the features (Section 4.2) | how strongly the views share latent structure |
+| `signal.share` $w_m$ | the coefficients | how much outcome signal each view carries |
+| `signal.align` $\alpha$ | the coefficients | whether signal features follow the shared direction ($\ell_j$) |
+| `outcome.model` | the predictor | linear, nonlinear, shared-latent or interaction signal |
 
-```text
-candidate_index = which(beta != 0).
-```
+Typical regimes:
 
-If fewer than five are available, it falls back to all features.
+- **single-view signal:** `signal.share = c(1, 0, 0)`;
+- **complementary signal:** `signal.share = c(1, 1, 1)`, `signal.align = 0`
+  (each view carries its own, unrelated part of the signal);
+- **redundant (aligned) signal:** `signal.align = 1` with high crosstalk (the
+  views carry the same signal along the shared direction);
+- **cross-view latent signal:** `outcome.model = "shared_latent"`; the
+  outcome depends on the shared factors, and crosstalk sets how strongly they
+  are visible in each view (with $\gamma = 0$ they are invisible, and very high
+  crosstalk makes the views redundant);
+- **nonlinear or interacting signal:** `"friedman"`, `"friedman2"`,
+  `"interaction"`.
 
-The five selected observed features are rank-transformed:
+Using several shared factors (`shared.latent.n.factors` $> 1$) lets the
+outcome depend on several cross-view axes (for example an immune and a
+metabolic axis) rather than one. Requesting more factors than the template has
+is an error, and the Friedman forms need at least five, so fit the template
+with `shared.rank = 5` for them.
 
-```text
-U_j = rank(X_j) / (n + 1).
-```
+### 5.6 Outcome types
 
-Then:
+**Continuous.**
 
-```text
-eta_friedman =
-  10 sin(pi U_1 U_2)
-  + 20 (U_3 - 0.5)^2
-  + 10 U_4
-  + 5 U_5.
-```
+$$Y_i = \eta_i + \varepsilon_i, \qquad \varepsilon_i \sim N\big(0,\ \mathrm{Var}(\eta)/\mathrm{snr}\big),$$
 
-For `Friedman`:
+so `snr` $= \mathrm{Var}(\eta)/\mathrm{Var}(\varepsilon)$.
 
-```text
-eta = eta_friedman.
-```
+**Binary.** A logistic model is a threshold model $Y = \mathbf{1}(\eta + \varepsilon > 0)$
+with $\varepsilon$ standard logistic, $\mathrm{Var}(\varepsilon) = \pi^2/3$.
+Rescaling the predictor to variance $\mathrm{snr}\cdot\pi^2/3$ gives `snr` the
+same meaning as above:
 
-## 7.3 `ygen.mode = "Friedman2"`
+$$\eta^\ast_i = b_0 + \mathrm{std}(\eta)_i\sqrt{\mathrm{snr}\,\pi^2/3}, \qquad Y_i \sim \mathrm{Bernoulli}\big(\mathrm{logit}^{-1}(\eta^\ast_i)\big),$$
 
-MimeSys computes both:
+with $b_0$ solved so that $\frac1n\sum_i\mathrm{logit}^{-1}(\eta^\ast_i) =$
+`binary.prevalence`.
 
-```text
-eta_linear
-```
+**Survival.** For exponential event times, $\log T = -\log h_0 - \eta + \log E$
+with $E \sim \mathrm{Exp}(1)$, and $\log E$ has a Gumbel distribution with
+variance $\pi^2/6$; hence
 
-and:
+$$\eta^\ast_i = \mathrm{std}(\eta)_i\sqrt{\mathrm{snr}\,\pi^2/6}, \qquad T_i \sim \mathrm{Exponential}\big(\text{rate } h_0e^{\eta^\ast_i}\big), \qquad h_0 = \texttt{baseline.hazard}.$$
 
-```text
-eta_friedman.
-```
+Censoring times are $C_i \sim U(\texttt{cens.lower}, \texttt{cens.upper})$
+(defaults 1 and 3), or, with `cens.rate` $= c$, $C_i = u_i\kappa$ with
+$u_i \sim U(0,1)$ and $\kappa$ solved so that
+$\frac1n\sum_i\mathbf 1(u_i\kappa < T_i) = c$ ($c = 0$: no censoring). Then
+$\texttt{time}_i = \min(T_i, C_i)$ and $\texttt{status}_i = \mathbf{1}(T_i \le C_i)$.
 
-Both parts are standardized and mixed with `w = nonlinear.weight` (default 0.5):
+### 5.7 Truth and split
 
-```text
-eta = sqrt(1 - w) * std(eta_linear) + sqrt(w) * std(eta_friedman).
-```
+`beta` holds $\beta_j$ (set to 0 where the linear predictor does not enter
+the outcome: `"friedman"`, `"shared_latent"`, or a weight of 1);
+`friedman_term` and `interaction_term` flag the nonlinear and interaction
+features; `outcome_feature` flags every feature that drives the outcome. The
+final predictor and its components are stored as `Xbeta`, `Xbeta_linear`,
+`Xbeta_shared`, `Xbeta_friedman` and `Xbeta_interaction`. A random
+$\mathrm{round}(n\cdot\texttt{train.fraction})$ samples (default 70%) form
+the training set.
 
-So this outcome combines additive observed-feature signal and nonlinear
-observed-feature signal, with `w` roughly the nonlinear share of signal
-variance (exactly, when the two parts are uncorrelated).
+## 6. Crosstalk calibration and template validation
 
-## 7.4 `ygen.mode = "SharedLatent"`
+### 6.1 Block distance
 
-The outcome signal is generated from shared latent factors instead of observed features.
+Simulated features are aligned with the observed ones by their template
+feature (offspring are not compared). For views $a \le b$, with
+$R^{\mathrm{obs}}_{ab}$ and $R^{\mathrm{sim}}_{ab}$ the blocks of feature-feature
+Pearson correlations (diagonal excluded within a view),
 
-During null generation, MimeSys simulates:
+$$d_{ab} = \sqrt{\frac{1}{\lvert\mathcal F\rvert}\sum_{(i,j)\in\mathcal F}\Big(R^{\mathrm{sim}}_{ab,ij} - R^{\mathrm{obs}}_{ab,ij}\Big)^2},$$
 
-```text
-S_new in R^(n x r).
-```
+the root-mean-square correlation difference over the finite entries
+$\mathcal F$.
 
-Here:
+### 6.2 Calibration (`calibrate_crosstalk()`)
 
-- `r` is the number of shared latent factors in the template,
-- rows are simulated samples,
-- columns are shared latent axes.
+For each grid value $\gamma$ (default $0, 0.25, \dots, 1$; values above
+`crosstalk_max()` are dropped) and replicate $b = 1,\dots,$`nrep` (default
+5), an independent null data set is simulated and
 
-### Are all shared factors used?
+$$D_b(\gamma) = \frac{1}{\binom{M}{2}}\sum_{a<b'} d_{ab'}, \qquad \bar D(\gamma) = \frac{1}{\texttt{nrep}}\sum_b D_b(\gamma), \qquad \mathrm{SE}(\gamma) = \frac{\mathrm{sd}_b\,D_b(\gamma)}{\sqrt{\texttt{nrep}}} .$$
 
-By default:
+The selected value is $\hat\gamma = \arg\min_\gamma \bar D(\gamma)$. Values with
+$\bar D(\gamma) \le \bar D(\hat\gamma) + \mathrm{SE}(\hat\gamma)$ are
+`near_optimal`, and `selection_frequency` gives how often each value is best
+in individual replicates. Only cross-view blocks enter the criterion because
+crosstalk changes only cross-view dependence. Calibration needs at least two
+views and two features per view; the MAE wrappers run it with seed + 1. With
+small templates the curve is often shallow; then report results over a range
+of crosstalk values.
 
-```r
-shared.latent.n_factors = NULL
-```
+### 6.3 Validation (`validate_template()`)
 
-MimeSys uses all available shared latent factors:
+After calibrating, one null data set is simulated at $\hat\gamma$ and the
+`max.features.per.view` (default 100) most variable observed features are
+compared with the same simulated features:
 
-```text
-K = r.
-```
+- **reconstruction error**: the block distances $d_{ab}$;
+- **correlation-pattern preservation**: per block, the Pearson and Spearman
+  correlation between the observed and simulated correlations, and their MAE
+  and RMSE;
+- **marginals**: per feature the Kolmogorov-Smirnov distance
+  $\sup_x\lvert\hat F_{\mathrm{obs}}(x) - \hat F_{\mathrm{sim}}(x)\rvert$, and the
+  quantile RMSE over the probabilities $0.05, 0.10, \dots, 0.95$, raw and
+  divided by the observed SD; summarized per view.
 
-If:
+For two independent samples of 53 from the same distribution the KS distance
+averages about 0.16, so values of that size reflect sampling noise only.
 
-```r
-shared.latent.n_factors = K
-```
+## 7. Mediation simulation (`gen_mediation()`)
 
-MimeSys uses the first `K` shared factors:
+`gen_mediation()` simulates an exposure $T$, mediators spread over one or more
+views, and an outcome $Y$ on top of realistic null data, with the true
+natural direct, indirect and total effects known exactly.
 
 ```text
-S_K = [S_1, ..., S_K].
+        a_j                 b_j
+  T ---------> M_1..M_K ---------> Y
+  |                                ^
+  +--------------- DE -------------+
 ```
 
-If `K > r`, MimeSys stops with an error.
+$T$ is randomized; the template's own dependence among features is the only
+other structure, and $Y$ depends only on $T$ and the mediators.
 
-### Why multiple shared factors matter
+### 7.1 Exposure and mediators
 
-Using only one latent factor can be limiting because cross-omics biology may not be one-dimensional.
+$T \sim \mathrm{Bernoulli}(\pi_T)$ (`exposure.prevalence`, default 0.5) or
+$T \sim N(0,1)$; its standardized version is $T^\ast = (T - \mu_T)/\sigma_T$
+with $(\mu_T,\sigma_T) = (\pi_T, \sqrt{\pi_T(1-\pi_T)})$ or $(0,1)$. Effects are
+for the contrast $T = 1$ versus $T = 0$.
 
-Using multiple shared factors allows the outcome to depend on several shared biological axes, for example:
+`n.mediators` mediators per view are drawn among the simulated features whose
+parent varies enough: the share of template samples not at the feature's most
+common value must be at least `min.variability` (default 0.2), so
+near-constant features (for example taxa that are almost always zero) cannot be
+mediators.
 
-- immune activation,
-- metabolic shift,
-- proteomic stress response,
-- inflammatory pathway activity,
-- microbiome-derived metabolite axis.
+### 7.2 Exposure to mediators (a-paths)
 
-### Shared latent linear outcome
+The exposure acts on the mediator's latent normal score $Z_j$ before it is
+mapped to data:
 
-For:
+$$W_j = a_j T^\ast + \sqrt{1 - a_j^2}\;Z_j, \qquad M_j = Q_j\big(\Phi(W_j^\star)\big),$$
 
-```r
-shared.latent.fun = "linear"
-```
+where $W^\star_j = W_j$ for a continuous exposure (then $W_j \sim N(0,1)$
+exactly, and $a_j$ is the latent correlation between exposure and mediator).
+For a binary exposure $W_j$ is a two-component normal mixture with CDF
 
-MimeSys standardizes selected shared factors:
-
-```text
-S_scaled = scale(S_K).
-```
+$$G_j(w) = (1-\pi_T)\,\Phi\!\left(\frac{w - a_jt_0^\ast}{\sqrt{1-a_j^2}}\right) + \pi_T\,\Phi\!\left(\frac{w - a_jt_1^\ast}{\sqrt{1-a_j^2}}\right),$$
 
-Then computes:
+and $W^\star_j = \Phi^{-1}\big(G_j(W_j)\big)$.
 
-```text
-eta_linear_shared = rowSums(S_scaled) / sqrt(K).
-```
+**Proposition.** $W^\star_j \sim N(0,1)$ exactly. *Proof.* Given $T^\ast = t^\ast$,
+$W_j \sim N(a_jt^\ast, 1 - a_j^2)$, so the marginal CDF of $W_j$ is $G_j$, which is
+continuous and increasing; hence $G_j(W_j)$ is uniform and $\Phi^{-1}$ of a
+uniform is standard normal. $\square$
 
-The division by `sqrt(K)` prevents variance from increasing just because more factors are included.
+The map $w \mapsto \Phi^{-1}(G_j(w))$ is fixed (it depends only on $a_j$,
+$\pi_T$ and the two exposure values) and increasing, so it is the same in every
+counterfactual world and preserves the sign of the exposure effect.
+Consequently **every mediator keeps its template marginal** (zeros, bounds,
+skewness); the exposure changes where each sample falls within it. Adding the
+effect on the data scale instead ($M \leftarrow M + aT$) would create negative
+abundances and break point masses.
 
-The final predictor is:
+### 7.3 Outcome (b-paths)
 
-```text
-eta = scale(eta_linear_shared).
-```
+Mediators enter standardized by their *template* mean and SD on the fitted
+scale, $\tilde M_j = (M_j - \mu_j)/\sigma_j$ (fixed constants, so the outcome
+model is identical in every counterfactual world):
 
-### Shared latent Friedman outcome
+$$\begin{aligned}
+\text{continuous: } \quad & Y = \mathrm{DE}\cdot T + \sum_j b_j\tilde M_j + \sum_k g_k\,\tilde M_{k_1}\tilde M_{k_2} + \sigma\varepsilon, \quad \varepsilon \sim N(0,1),\\
+\text{binary: } \quad & \mathrm{logit}\,P(Y = 1) = b_0 + \mathrm{DE}\cdot T + \sum_j b_j\tilde M_j + \sum_k g_k\,\tilde M_{k_1}\tilde M_{k_2}.
+\end{aligned}$$
 
-For:
+The optional interactions (`n.interactions`, default 0) use random pairs of
+mediators, possibly from different views.
 
-```r
-shared.latent.fun = "friedman"
-```
+### 7.4 Natural effects
 
-MimeSys requires:
+With potential outcomes $Y(t, m)$ and potential mediators $M(t)$, and because
+$\mathrm{E}[Y(t,m)]$ has no exposure-mediator interaction,
 
-```text
-K >= 5.
-```
+$$\begin{aligned}
+\mathrm{NIE} &= \mathrm{E}[Y(1, M(1))] - \mathrm{E}[Y(1, M(0))] = \sum_j b_j\Delta_j + \sum_k g_k\Delta_k,\\
+\mathrm{NDE} &= \mathrm{E}[Y(1, M(0))] - \mathrm{E}[Y(0, M(0))] = \mathrm{DE}, \qquad \mathrm{TE} = \mathrm{NIE} + \mathrm{NDE},
+\end{aligned}$$
 
-It takes the first five selected shared factors and rank-transforms them:
+with
 
-```text
-U_j = rank(S_j) / (n + 1), j = 1, ..., 5.
-```
+$$\Delta_j = \mathrm{E}[\tilde M_j(1)] - \mathrm{E}[\tilde M_j(0)], \qquad \Delta_k = \mathrm{E}[\tilde M_{k_1}\tilde M_{k_2}(1)] - \mathrm{E}[\tilde M_{k_1}\tilde M_{k_2}(0)].$$
 
-Then:
+### 7.5 Path sizes and exact calibration
 
-```text
-eta_shared_friedman =
-  10 sin(pi U_1 U_2)
-  + 20 (U_3 - 0.5)^2
-  + 10 U_4
-  + 5 U_5.
-```
+**Initial sizes.** All paths start at
 
-The final predictor is:
+$$s = \sqrt{\mathrm{TIE}\cdot\sigma_T/K}, \qquad a_j = \pm s, \quad b_j = \pm s,$$
 
-```text
-eta = scale(eta_shared_friedman).
-```
+with signs from `dir.a` and `dir.b`. The heuristic: a unit contrast moves
+$T^\ast$ by $1/\sigma_T$, hence each standardized mediator by about $s/\sigma_T$,
+so $\mathrm{NIE} \approx K\cdot s\cdot s/\sigma_T = \mathrm{TIE}$. If $s \ge 0.95$
+the request is infeasible (the exposure would explain almost all of a
+mediator's latent variance) and an error asks for more mediators or a smaller
+`TIE`. Interaction coefficients start at $\pm\,\mathrm{mean}\lvert b\rvert$.
 
-### Shared latent Friedman2 outcome
+**Calibration.** The heuristic is approximate (quantile maps are nonlinear),
+so the $\Delta$'s are computed by Monte Carlo (Section 7.6) and, because the
+NIE is linear in $(b, g)$ for fixed a-paths, all $b$ and $g$ are multiplied by
+one factor:
 
-For:
+$$\lambda = \frac{\mathrm{TIE}\cdot\mathrm{dir.a}\cdot\mathrm{dir.b}}{\sum_j b_j\Delta_j + \sum_k g_k\Delta_k}, \qquad b \leftarrow \lambda b,\ g \leftarrow \lambda g ,$$
 
-```r
-shared.latent.fun = "friedman2"
-```
+so the NIE equals $\pm\mathrm{TIE}$ exactly. With `"random"` directions the
+pathway effects can cancel, so the summed absolute effects
+$\sum_j\lvert b_j\Delta_j\rvert + \sum_k\lvert g_k\Delta_k\rvert$ are set to `TIE`
+instead.
 
-MimeSys computes:
+**Null scenarios.** `"null_a"`: $a = 0$ with the b-paths of the spiked
+scenario; `"null_b"`: spiked $a$, $b = g = 0$; `"null_ab"`: both 0. The NIE is
+0 in all three, and power and type I error runs have matched path sizes.
 
-```text
-eta_linear_shared
-```
+### 7.6 Paired counterfactual Monte Carlo
 
-and:
+The features and mediators of a replicate are fixed. The `n.mc` draws (default
+5000) are split into chunks of 1000, each with its own seed. A
+*counterfactual world* is a full null simulation of a chunk, with that chunk's
+seed, in which the exposure is set to a given value; all worlds of a chunk use
+the same seed, so every latent score and noise term is identical across worlds
+and only the exposure differs (common random numbers). Means of the
+standardized features are accumulated over chunks. This gives every $\Delta_j$
+with very low variance and also the true exposure effect on every feature
+(`exposure_effect`; for non-mediators it is non-zero only through the
+renormalization of a closed composition).
 
-```text
-eta_shared_friedman.
-```
+**Continuous exposure.** Mediators respond nonlinearly to a continuous
+exposure, so a population draw $T \sim N(0,1)$ gives each mediator's linear
+slope $\mathrm{a\_slope}_j = \mathrm{Cov}(T, \tilde M_j)/\mathrm{Var}(T)$ and
 
-Then:
+$$\mathrm{NIE}_{\mathrm{linear}} = \sum_j b_j\,\mathrm{a\_slope}_j ,$$
 
-```text
-eta = sqrt(1 - w) * std(eta_linear_shared) + sqrt(w) * std(eta_shared_friedman),
-w   = nonlinear.weight (default 0.5).
-```
+the quantity product-of-coefficients estimators target.
 
-### Role of crosstalk in shared-latent outcomes
+### 7.7 Binary outcome
 
-In `SharedLatent`, the true outcome signal is:
+`TIE` and `DE` are on the conditional log-odds scale. The intercept $b_0$ is
+solved so that the population prevalence equals `outcome.prevalence`:
 
-```text
-Y signal = function(S_new).
-```
+$$\pi_T\,\mathrm{E}\big[\mathrm{logit}^{-1}(b_0 + \eta(1, M(1)))\big] + (1 - \pi_T)\,\mathrm{E}\big[\mathrm{logit}^{-1}(b_0 + \eta(0, M(0)))\big] = \texttt{outcome.prevalence}$$
 
-Crosstalk controls how strongly `S_new` is visible in each observed omics layer.
+(for a continuous exposure, the population draw is used). Odds ratios are
+non-collapsible, so the natural effects on the probability scale are reported
+from the counterfactual risks $p_{tt'} = \mathrm{E}\big[P(Y = 1 \mid T = t, M(t'))\big]$:
 
-Low crosstalk means the outcome-driving shared factors may be weakly represented in observed features.
+$$\mathrm{RD}_{\mathrm{NIE}} = p_{11} - p_{10}, \quad \mathrm{RD}_{\mathrm{NDE}} = p_{10} - p_{00}, \quad \mathrm{OR}_{\mathrm{NIE}} = \frac{\mathrm{odds}(p_{11})}{\mathrm{odds}(p_{10})}, \quad \mathrm{OR}_{\mathrm{NDE}} = \frac{\mathrm{odds}(p_{10})}{\mathrm{odds}(p_{00})},$$
 
-High crosstalk means those shared factors are more strongly reflected in every layer.
+with the total effects $p_{11} - p_{00}$ and
+$\mathrm{odds}(p_{11})/\mathrm{odds}(p_{00})$, and the log odds ratios.
 
-Very high crosstalk can make layers redundant, which may not help fusion.
+### 7.8 Observed data and truth
 
-With `crosstalk = 0` the shared factors do not enter any observed feature, so
-the outcome is unrelated to the features; MimeSys warns in that case.
+The observed replicate draws $T$ for `n` samples, applies the a-paths at the
+observed $T^\ast$, and generates $Y$ from the model above (always on the
+fitted scale). Per feature: `mediator`, `a_path` ($a_j$), `a_effect`
+($\Delta_j$), `a_slope`, `b_path`, `indirect` ($b_j\Delta_j$),
+`exposure_effect`, `interaction_term`. In `truth$mediation`: `NIE`, `NDE`,
+`TE`, `TIE_target`, `NIE_linear`, `NIE_by_view`, `NIE_interaction`, and for a
+binary outcome the risks, risk differences, odds ratios and log odds ratios.
 
-## 7.5 `ygen.mode = "Interaction"`
+## 8. Sequential mediation
 
-MimeSys selects `K = n.interactions` feature pairs (default: the number of view
-pairs). Pair `k` cycles over the view pairs `(a, b)` and takes one feature from
-each view, preferring features with nonzero `beta`. With standardized features
-`x~`:
+With `stages`, mediators are grouped into ordered stages of views (for
+example `list("Microbiome", "Metabolome")` for exposure $\to$ microbes $\to$
+metabolites $\to$ outcome), and each mediator of a later stage is linked to
+mediators of the previous stage.
 
 ```text
-eta_int = sum_k x~_{a_k} * x~_{b_k},
-eta     = sqrt(1 - w) * std(eta_linear) + sqrt(w) * std(eta_int),
-w       = interaction.weight (default 0.5).
+  T --a1--> M1 --b1------------------> Y
+  |          \                         ^
+  |           d                        |
+  |            v                       |
+  +----a2----> M2 --b2-----------------+
+  +------------------- DE -------------+
 ```
 
-`w = 1` gives a pure cross-view interaction outcome with no main effects. The
-pairs are stored in `truth$interaction_pairs`.
+### 8.1 Latent model
 
-## 7.6 Ground truth
+For a mediator $j$ of stage $s$ with parents $k$ in stage $s-1$:
 
-`feature_metadata$outcome_feature` marks the features that drive the outcome
-directly. In `SharedLatent` the outcome depends on the shared latent factors
-rather than on individual features, so no feature is marked (the latent truth
-is in `truth$shared`). Components with weight 0 are not marked. `beta` is kept only for features that enter through the linear
-predictor and is set to zero otherwise (`Friedman`, `SharedLatent`, and
-`Interaction` with `w = 1`). `friedman_term` and `interaction_term` mark the
-nonlinear and interaction features.
+$$\begin{aligned}
+s = 1: \quad & W_j = a_jT^\ast + \sqrt{1 - a_j^2}\;Z_j,\\
+s > 1: \quad & W_j = a_jT^\ast + \sum_{k} d_{jk}W_k + c_jZ_j .
+\end{aligned}$$
 
-## 8. Final Outcome Types
+Parents enter through their own latent scores *after* their exposure effect,
+so exposure that reached a parent is passed on. Because each $W$ is linear in
+$T^\ast$ and the template scores $Z = (Z_1,\dots,Z_K)$,
 
-Once `eta` is computed, MimeSys generates the actual outcome.
+$$W_j = \mu_jT^\ast + L_jZ, \qquad \mu_j = a_j + \sum_k d_{jk}\mu_k, \qquad L_j = \sum_k d_{jk}L_k + c_je_j ,$$
 
-### 8.1 Continuous outcome
+with $\mu_j = a_j$ and $L_j = \sqrt{1-a_j^2}\,e_j$ in stage 1.
 
-For:
+**Template correlation.** The $Z$'s of different mediators are correlated
+through the template (within a view by the factor model, across views by the
+shared space). Their covariance is computed exactly: for mediator $i$ in view
+$m$ and $l$ in view $m'$,
 
-```r
-outcome.type = "continuous"
-```
+$$\Sigma_{il} = \Lambda_i\,C_{mm'}\,\Lambda_l^\top, \qquad C_{mm} = I, \qquad C_{mm'} = \sqrt{\gamma_m\gamma_{m'}}\,B_mB_{m'}^\top .$$
 
-MimeSys computes:
+**Unit variance.** With $L_0 = \sum_k d_{jk}L_k$, $v_0 = L_0\Sigma L_0^\top$ and
+$\kappa = L_0\Sigma e_j$, the condition
+$\mathrm{Var}(W_j) = \mu_j^2 + v_0 + 2c_j\kappa + c_j^2 = 1$ gives the positive
+root
 
-```text
-sigma^2 = Var(eta) / snr.
-```
+$$c_j = -\kappa + \sqrt{\kappa^2 + 1 - \mu_j^2 - v_0}$$
 
-Then:
+(an error if it does not exist or is below $10^{-3}$). Then, given $T$,
+$W_j \sim N(\mu_jT^\ast, 1 - \mu_j^2)$, and the binary-exposure correction of
+Section 7.2 is applied with $\mu_j$ in place of $a_j$. Every mediator at every
+stage keeps its template marginal.
 
-```text
-Y_i = eta_i + epsilon_i,
-epsilon_i ~ N(0, sigma^2).
-```
+### 8.2 Links
 
-Large `snr` means lower noise. Small `snr` means higher noise.
+The links from stage $s-1$ to stage $s$ form a sparse signed matrix (rows:
+children, columns: parents), many-to-many. `stage.links$type`:
 
-### 8.2 Binary outcome
+- `"random"`: each pair linked with probability `density` (0.3); every child
+  gets at least one parent and every parent at least one child;
+- `"hub"`: $\max(1, \mathrm{round}(\text{density}\cdot n_{\mathrm{parents}}))$
+  parents are hubs, every child has exactly one hub parent;
+- `"convergent"`: every child has $\max(2, \mathrm{round}(\text{density}\cdot n_{\mathrm{parents}}))$ parents;
+- `"explicit"`: the user supplies the matrices.
 
-For:
+Each child's pattern row $w_j$ is scaled so that the parents' term has
+variance `strength` (default 0.3):
 
-```r
-outcome.type = "binary"
-```
+$$d_j = w_j\sqrt{\frac{\texttt{strength}}{w_j^\top R\,w_j}}, \qquad R = \mu_{\mathcal P}\mu_{\mathcal P}^\top + L_{\mathcal P}\Sigma L_{\mathcal P}^\top ,$$
 
-MimeSys standardizes `eta`, rescales it so that `snr` is the signal-to-noise
-ratio of the latent logistic model, and solves an intercept `b0` that hits the
-target prevalence:
+with $R$ the covariance of the parents' latent scores, so the strength does
+not depend on how many parents a child has. The links are fixed in the spiked
+scenario and reused unchanged in the null scenarios. `stage.direct`
+multiplies the initial a-paths of each stage (0: the stage is reached only
+through the previous one).
 
-```text
-eta*_i = sqrt(snr * pi^2 / 3) * (eta_i - mean(eta)) / sd(eta),
-b0 solves mean(logistic(b0 + eta*_i)) = binary.prevalence,
-Y_i ~ Bernoulli(logistic(b0 + eta*_i)).
-```
+### 8.3 Natural path-specific effects
 
-### 8.3 Survival outcome
+With $S$ stages there are $S(S+1)/2$ indirect paths $(r, s)$, $r \le s$: the
+exposure enters at stage $r$ and reaches $Y$ through the stage-$s$ mediators.
+For each observed stage $s$, the chain up to $s$ is built from its own copy of
+the exposure, in which stage $r$ receives the exposure value $t(r,s)$; all
+copies share the same template noise (cross-world counterfactuals with common
+random numbers). The paths are switched from 0 to 1 one at a time, later
+starting paths first, and each path's effect is the change in the expected
+outcome. For two stages:
 
-For:
+$$\begin{aligned}
+T \to M_2 \to Y: \quad & \mathrm{E}\,Y\big(1, M_1(0), M_2(1, M_1(0))\big) - \mathrm{E}\,Y\big(1, M_1(0), M_2(0, M_1(0))\big),\\
+T \to M_1 \to M_2 \to Y: \quad & \mathrm{E}\,Y\big(1, M_1(0), M_2(1, M_1(1))\big) - \mathrm{E}\,Y\big(1, M_1(0), M_2(1, M_1(0))\big),\\
+T \to M_1 \to Y: \quad & \mathrm{E}\,Y\big(1, M_1(1), M_2(1, M_1(1))\big) - \mathrm{E}\,Y\big(1, M_1(0), M_2(1, M_1(1))\big).
+\end{aligned}$$
 
-```r
-outcome.type = "survival"
-```
+These telescope, so they add up exactly to the NIE.
 
-MimeSys standardizes `eta` and rescales it so that `snr` is the
-signal-to-noise ratio on the log event-time scale (the extreme-value error of
-an exponential model has variance `pi^2 / 6`):
+**Calibration.** Given the a-paths and links, each path effect is linear in the
+b-paths, and paths ending at stage $s$ scale with the stage-$s$ b-paths. By
+default one factor scales all b-paths (as in Section 7.5). With `stage.share`
+$= (\omega_1,\dots,\omega_S)$, normalized,
 
-```text
-eta*_i = sqrt(snr * pi^2 / 6) * (eta_i - mean(eta)) / sd(eta),
-h_i = surv.hscale exp(eta*_i),
-T_i ~ Exponential(rate = h_i).
-```
+$$b_j \leftarrow b_j\,\lambda_{s(j)}, \qquad \lambda_s = \frac{\omega_s\cdot\mathrm{target}}{\mathrm{raw}_s},$$
 
-Censoring is:
+where $\mathrm{raw}_s$ is the sum of the path effects ending at stage $s$
+before scaling; the mediators of stage $s$ then carry exactly the share
+$\omega_s$ (exact without interactions). Net calibration to $\pm$TIE needs
+positive links; with negative or random links the summed absolute pathway
+effects are calibrated.
 
-```text
-C_i ~ Uniform(cens.lower, cens.upper)          if cens.rate is NULL,
-C_i = U_i c,  U_i ~ Uniform(0, 1)               otherwise,
-```
+**Truth.** `path_effects` (one row per path), `NIE_by_stage`, `links` (parent,
+child, latent coefficient $d_{jk}$ and
+$\mathrm{approx\_chain\_effect} = (\mu_{\mathrm{parent}}/\sigma_T)\,d_{jk}\,b_{\mathrm{child}}$, a
+latent-scale linear approximation), per feature `stage`, `n_parents`,
+`n_children`, and for a binary outcome the path-specific risk differences.
 
-where `c` is solved so that the proportion with `C_i < T_i` equals
-`cens.rate` (`cens.rate = 0` means no censoring).
+### 8.4 Scenarios
 
-Observed output is:
+| Setting | Scenario |
+|---|---|
+| defaults | all three paths active |
+| `stage.direct = c(1, 0)`, `stage.share = c(0, 1)` | pure chain $T \to M_1 \to M_2 \to Y$ |
+| `stage.links = list(strength = 0)` | unlinked stages, still correlated through crosstalk (a null for the link) |
+| `effect.type = "null_a"`, `"null_b"`, `"null_ab"` | as in parallel mediation; links unchanged |
 
-```text
-time_i = min(T_i, C_i)
-status_i = 1 if T_i <= C_i, 0 otherwise.
-```
+### 8.5 Estimation on the observed scale
 
-## 9. Train/Test Split
+The truth is exact, but what an estimator recovers from observed data is a
+different question:
 
-MimeSys samples:
+- **Crosstalk is a mediator-mediator confounder.** The template scores of the
+  stage-1 and stage-2 mediators are correlated through the shared variates, a
+  common cause of both that is not on any path from $T$. The path-specific
+  truth holds it fixed, but a regression of $M_2$ on $T$ and $M_1$ is
+  confounded by it. On the Stelzer template ($n = 30{,}000$, TIE $= 1$) the chain
+  $T \to M_1 \to M_2 \to Y$ was 0.23 (truth), estimated as 0.14 with crosstalk 1
+  and 0.19 with crosstalk 0; the difference moved to the direct
+  $T \to M_2 \to Y$ path.
+- **Nonlinear marginals.** For skewed or sparse parents (microbiome relative
+  abundances) the observed value is a nonlinear function of the latent score,
+  so a linear model captures only part of the chain; on the Franzosa
+  microbiome about half of the chain was attributed to the direct path.
+  Transforming such features (ranks, log ratios) helps.
 
-```text
-round(nsample * p.train)
-```
+## 9. MAE wrappers and reproducibility
 
-samples for training.
-
-It then subsets:
-
-- feature table,
-- sample metadata,
-- factor scores,
-- shared latent factors,
-- outcome metadata.
-
-The outcome is generated once before splitting.
-
-## 10. Crosstalk Calibration
-
-`calibrate_crosstalk()` is used when the user wants to choose crosstalk by reconstruction of empirical cross-view correlation.
-
-The process is:
-
-1. Choose a grid of candidate crosstalk values (default `0, 0.25, ..., 1`);
-   values above `crosstalk_max()` are dropped with a warning.
-2. For each value, simulate `nrep` (default 5) independent null data sets with
-   `nsample` samples (default the template size). Each view needs at least two
-   features.
-3. Align simulated and observed features by template feature name (offspring
-   are not compared) and compute, for every pair of views `(a, b)`, the block
-   distance
-
-   ```text
-   d_ab = sqrt( mean over finite entries of (R_sim_ab - R_obs_ab)^2 ),
-   ```
-
-   the rescaled Frobenius norm of the difference of the feature-correlation
-   blocks (diagonal excluded within a view). Observed blocks are computed once
-   and cached.
-4. For each replicate, average `d_ab` over all cross-view blocks; average over
-   replicates to get the mean, SD and SE for each grid value.
-5. Select the value with the smallest mean. Values within one SE of it are
-   `near_optimal`, and `selection_frequency` gives how often each value is best
-   in individual replicates. A warning is given when the best value is at the
-   top of a grid that stops well short of `crosstalk_max()`.
-
-Calibration always compares with the matrices stored in the template (fitted
-scale). It needs at least two views; a template without shared factors gives a
-warning. The MAE wrappers calibrate by default (`crosstalk = "calibrate"`),
-skip calibration for a single view, no shared factors or fewer than two
-features per view, and run it with seed + 1 so its replicates do not share
-random numbers with the simulation that follows.
-
-This selects crosstalk for feature-structure reconstruction, not for
-predictive performance. With small templates the curve is often shallow; then
-report results over a range of crosstalk values.
-
-### 10.1 Template validation
-
-`validate_template()` calibrates crosstalk, simulates one null data set at the
-selected value (seed + 1), keeps the `max_features_per_view` (default 100) most
-variable observed features and the same simulated features, and reports:
-
-- `reconstruction_error`: the block distances above;
-- `correlation_structure`: per block, the Pearson and Spearman correlation
-  between observed and simulated feature-feature correlations, MAE and RMSE
-  (within-view blocks currently include the self-pairs, which slightly inflates
-  them);
-- `marginal_diagnostics`: per view, the mean and median Kolmogorov-Smirnov
-  distance, the standardized and raw quantile RMSE over 19 probabilities.
-
-### 10.2 Reproducibility
+`simulate_mimesys()`, `simulate_mimesys_null()` and `simulate_mediation()`
+fit the template if needed, calibrate crosstalk by default
+(`crosstalk = "calibrate"`; skipped for a single view, no shared factors, or
+fewer than two features per view), call the simulators, and return one
+`MultiAssayExperiment` per replicate: assay `simulated`, feature truth in
+`rowData()`, outcome, exposure and split in `colData()`, settings, provenance
+and latent truth in `metadata()`.
 
 Every function that uses random numbers has `seed = 1234` by default and
-restores the caller's random-number state on exit (`withr::local_seed()`);
-`seed = NULL` uses the current stream. Internal loops call the unseeded
-engines, so replicates are independent draws.
+restores the caller's random-number state on exit; `seed = NULL` uses the
+current stream. Calibration inside the wrappers uses seed + 1, so its
+replicates never share random numbers with the simulation, and internal loops
+call unseeded engines so replicates are independent.
 
-## 11. Summary of Controls
+## 10. Worked example: the Stelzer template
 
-`rank`:
+`fit_template(stelzer_mae, view.transform = c(Metabolomics = "log1p", Proteomics = "log1p"))`
+(53 subjects, 40 features in each of CYTOF, Metabolomics and Proteomics):
 
-- within-view factor rank,
-- if `NULL`, chosen by variance explained,
-- not `2 log(p)` by default.
+- within-view ranks $k = (6, 7, 7)$, explaining 0.72, 0.73 and 0.70 of the
+  normal-score variance;
+- largest GCCA eigenvalues 2.12, 1.81, 1.75, 1.67, 1.56;
+- parallel analysis: step 1 tests $\lambda = 2.121$ against a null 95th
+  percentile of 2.083 ($p = 0.020$, kept); after deflation, step 2 tests
+  $\lambda = 1.808$ against 2.007 ($p = 0.667$, stop), so $r = 1$. An
+  index-matched rule would have kept several of the slowly decreasing
+  eigenvalues;
+- `crosstalk_max()` $= (1.42, 1.46, 1.37)$;
+- calibration over $\gamma \in \{0, 0.125, \dots, 1\}$ with 10 replicates gives
+  mean cross-view distances between 0.192 and 0.206 (minimum at
+  $\gamma = 0.625$): a shallow curve, because with 53 samples the sampling noise
+  of a correlation ($\approx 1/\sqrt{53} = 0.14$) dominates the weak cross-view
+  signal;
+- validation: mean KS distances 0.10 to 0.15 per view, at the level expected
+  for two samples of 53 from the same distribution.
 
-`shared.rank`:
+On the Franzosa template (155 samples, Microbiome and Metabolome), the
+parallel-analysis steps have $p = 0.005, 0.005, 0.010, 0.388$, so $r = 3$, and
+the Microbiome view is a proportion view with largest total 0.917.
 
-- number of shared cross-view latent factors,
-- if `NULL`, chosen by permutation-based parallel analysis,
-- if numeric, forced to that value.
-
-`crosstalk`:
-
-- strength of cross-view feature dependence,
-- `0` removes shared latent dependence,
-- `1` uses fitted template shared structure.
-
-`de.align`:
-
-- aligns beta effects with shared latent loading direction.
-
-`signal.share`:
-
-- controls how much each view contributes to additive observed-feature signal.
-
-`friedman.share`:
-
-- controls which views supply the five observed features used in Friedman/Friedman2.
-
-`shared.latent.n_factors`:
-
-- controls how many shared latent factors are used for SharedLatent outcomes,
-- `NULL` means use all available shared factors.
-
-`shared.latent.fun`:
-
-- `"linear"`: linear shared-latent score,
-- `"friedman"`: nonlinear Friedman function on shared factors,
-- `"friedman2"`: linear plus nonlinear shared-latent signal.
-
-## 12. Mediation Simulation
-
-`gen_mediation()` and `simulate_mediation()` add an exposure, mediators and an
-outcome to null multi-view data.
-
-### 12.1 Exposure
-
-`T` is binary (`P(T = 1) = pi`) or standard normal. Its standardized version
-is `T* = (T - mu_T) / sd_T`.
-
-### 12.2 Exposure to mediators
-
-For mediator `j` with latent normal score `Z_j` from the template:
-
-```text
-Z_j <- a_j T* + sqrt(1 - a_j^2) Z_j.
-```
-
-For a continuous exposure this is again standard normal. For a binary
-exposure it is a two-component normal mixture with CDF
-
-```text
-F(x) = (1 - pi) Phi((x - a_j t0*) / s_j) + pi Phi((x - a_j t1*) / s_j),
-s_j = sqrt(1 - a_j^2),
-```
-
-and `Z_j <- Phi^-1(F(Z_j))` restores an exact standard normal. The latent
-score is then mapped through the feature's empirical quantile function, so
-the mediator keeps its template marginal while the exposure shifts it.
-
-### 12.3 Outcome
-
-With mediators standardized by their template mean and SD (`M~_j`):
-
-```text
-continuous: Y = DE T + sum_j b_j M~_j + sum_k g_k M~_k1 M~_k2 + sigma e,
-binary:     logit P(Y = 1) = b0 + DE T + sum_j b_j M~_j + sum_k g_k M~_k1 M~_k2.
-```
-
-### 12.4 Path sizes and calibration
-
-Initial paths are `|a_j| = |b_j| = s = sqrt(TIE sd_T / K)` (K mediators), with
-signs from `dir.a` and `dir.b`; interaction coefficients have size
-`mean(|b|)`. Paired counterfactual Monte Carlo (`n.mc` draws under `T = 1` and
-`T = 0` with the same random stream) gives the exposure effect on every
-standardized feature, `Delta_j = E[M~_j(1)] - E[M~_j(0)]`. The b-paths and
-interaction coefficients are then scaled by one factor so that
-
-```text
-NIE = sum_j b_j Delta_j + sum_k g_k Delta(M~_k1 M~_k2) = TIE dir.a dir.b,
-```
-
-or, with a random direction, so that the summed absolute pathway effects
-equal `TIE`. In `null_a` the same b-paths are used with `a = 0`; in `null_b`
-the a-paths are kept and `b = 0`.
-
-### 12.5 Truth
-
-- `NIE`, `NDE = DE`, `TE`, the indirect effect per view and through
-  interactions, and per feature `a_path`, `a_effect`, `a_slope`, `b_path`,
-  `indirect` and `exposure_effect`.
-- Continuous exposure: `NIE_linear = sum_j b_j a_slope_j`, with `a_slope_j`
-  the population linear regression slope of `M~_j` on `T`, which is what
-  product-of-coefficients estimators target.
-- Binary outcome: `NIE`, `NDE`, `TE` are conditional (linear-predictor)
-  log-odds effects. The natural effects, from counterfactual risks
-  `p(t, t') = E[P(Y = 1 | T = t, M(t'))]`, are reported as risk differences,
-  odds ratios and log odds ratios in `truth$mediation$binary`.
-- In closed compositional views, renormalization transmits the exposure to
-  non-mediators; their true effect is in `exposure_effect`.
-- All truth refers to the fitted (transformed) scale.
-
-### 12.6 Sequential mediation
-
-With `stages`, the mediator views are ordered, e.g. `T -> M1 -> M2 -> Y` for
-stages `list("Microbiome", "Metabolome")`. Write `W_j` for the latent score of
-mediator `j` before the binary-exposure correction. Stage-1 mediators are as
-in 12.2, `W_j = a_j T* + sqrt(1 - a_j^2) Z_j`. A stage-`s` mediator (`s > 1`)
-with parents `k` in stage `s - 1` is
-
-```text
-W_j = a_j T* + sum_k d_jk W_k + c_j Z_j.
-```
-
-Every `W` is linear in `T*` and the template latent scores,
-`W_j = mu_j T* + L_j Z`, with `Cov(Z) = Sigma` from the fitted loadings and
-crosstalk (`Cov(Z_i, Z_k) = Lambda_i Cov(f_m, f_m') Lambda_k'`). Given `T`,
-`W_j` is normal with mean `mu_j T*`, where `mu_j = a_j + sum_k d_jk mu_k`.
-`c_j > 0` solves `mu_j^2 + Var(L_j Z) = 1`, so each `W_j` has unit variance,
-and the binary-exposure correction of 12.2 is applied with `mu_j` in place of
-`a_j`. Every mediator therefore keeps its template marginal.
-
-**Links.** A sparse signed pattern (rows: children, columns: parents) is drawn
-by `stage.links$type`: `"random"` (each pair with probability `density`, every
-child with at least one parent and every parent with at least one child),
-`"hub"` (a `density` fraction of the parents, at least one, are hubs; every
-child gets one hub parent, and every hub gets a child when there are at least
-as many children as hubs), `"convergent"` (each child gets
-`max(2, density * n_parents)` parents) or `"explicit"`. Each child's row is
-scaled so that the parents' term has variance `strength`,
-`d_j' R d_j = strength`, with `R` the parents' latent covariance (close to the
-share of the child's latent variance explained by its parents when that term
-is nearly uncorrelated with the exposure and the child's own score). The links are
-fixed in the spiked scenario and reused in the null scenarios.
-
-**Natural path-specific effects.** A path `(r, s)` starts at stage `r` and
-reaches `Y` through the stage-`s` mediators. For each observed stage `s`, the
-chain up to `s` is built from its own copy of the exposure, so each path can
-be switched on separately (cross-world counterfactuals with shared random
-draws). Paths are switched from the unexposed to the exposed level one at a
-time, later-starting paths first; for two stages:
-
-```text
-T -> M2 -> Y:       E[Y(1, M1(0), M2(1, M1(0)))] - E[Y(1, M1(0), M2(0, M1(0)))]
-T -> M1 -> M2 -> Y: E[Y(1, M1(0), M2(1, M1(1)))] - E[Y(1, M1(0), M2(1, M1(0)))]
-T -> M1 -> Y:       E[Y(1, M1(1), M2(1, M1(1)))] - E[Y(1, M1(0), M2(1, M1(1)))]
-```
-
-These telescope to the NIE. Each is linear in the b-paths given the a-paths
-and links, so `stage.share` is met by scaling the b-paths of each stage
-separately (paths ending at stage `s` scale with the stage-`s` b-paths).
-
-**Truth.** `path_effects`, `NIE_by_stage`, per-feature `stage`, `n_parents`
-and `n_children`, and the link list with each latent coefficient and an
-approximate per-link chain effect `(mu_parent / sd_T) d_jk b_child` (a
-latent-scale linear approximation; the exact totals are in `path_effects`).
-For a binary outcome the path-specific risk differences are also reported.
-
-**Estimation on the data scale.** The links act on the latent scores. For
-roughly Gaussian features the data are close to linear in them and
-product-of-coefficients estimates recover each path. For strongly skewed or
-sparse features (e.g. microbiome relative abundances) the observed parent is
-a non-linear function of its latent score, so a linear model on the observed
-values captures only part of the chain, and the remainder appears as a direct
-`T -> M2` effect. This is a property of the data, not of the truth, and is
-worth keeping in mind when benchmarking linear sequential methods
-(transforming such features, e.g. ranks or log ratios, helps).
-
-**Crosstalk as mediator-mediator confounding.** The template latent scores of
-stage-1 and stage-2 mediators are correlated through the shared factors, a
-common cause of both that is not on any path from `T`. The path-specific truth
-holds it fixed correctly, but a regression of `M2` on `T` and `M1` is
-confounded by it. On the Stelzer template (n = 30,000, TIE = 1) the chain
-`T -> M1 -> M2 -> Y` was 0.23 (truth) but estimated as 0.14 with crosstalk 1
-and 0.19 with crosstalk 0, the difference moving to the direct `T -> M2 -> Y`
-path. Varying `crosstalk`, and the `strength = 0` scenario, separate this from
-real links.
-
-## 13. Recommended Controlled Shared-Latent Setup
-
-For controlled nonlinear shared-latent validation:
+For a controlled nonlinear shared-latent setting:
 
 ```r
-template <- fit_template(
-  views,
-  rank = 10,
-  shared.rank = 5
-)
-
+template <- fit_template(views, rank = 10, shared.rank = 5)
 sim <- gen_simmba(
-  nsample = 200,
-  template = template,
-  p = c(100, 100, 100),
-  crosstalk = 0.75,
-  ygen.mode = "SharedLatent",
-  shared.latent.fun = "friedman2",
-  shared.latent.n_factors = 5,
-  snr = 0.5
+  n = 200, template = template, p = 100, crosstalk = 0.75,
+  outcome.model = "shared_latent", shared.latent.function = "friedman2",
+  shared.latent.n.factors = 5, snr = 0.5
 )
 ```
 
-This makes the shared latent structure explicit:
+Five shared factors are fitted and all five drive the outcome (linear plus
+nonlinear parts), and crosstalk sets how visible they are in each view.
 
-- exactly five shared factors are fitted,
-- exactly five shared factors are used for the outcome,
-- the outcome contains both linear and nonlinear shared-latent signal,
-- crosstalk controls how strongly that outcome-driving latent structure appears in each observed omics layer.
+## 11. Default settings
+
+| Function | Main defaults |
+|---|---|
+| `fit_template()` | `rank = NULL`, `var.explained = 0.7`, `max.rank` $= \lfloor n_0/3\rfloor$, `shared.rank = NULL`, `nperm = 200`, `shared.rank.runs = 1` |
+| `sim_from_template()` | `crosstalk = 1`, `feature.select = "random"`, `feature.jitter = 0.2`, `back.transform = FALSE` |
+| `gen_simmba()` | `signal.prob = 0.1`, `signal.neg.prob = 0.5`, `effect.meanlog = 1`, `effect.sdlog = 0.4`, `outcome.model = "linear"`, `outcome.type = "continuous"`, `snr = 1`, `binary.prevalence = 0.5`, `nonlinear.weight = interaction.weight = 0.5`, `train.fraction = 0.7`, `nrep = 1` |
+| `calibrate_crosstalk()` | `crosstalk.grid = seq(0, 1, 0.25)`, `nrep = 5`, `n` $= n_0$ |
+| `gen_mediation()` | `n.mediators = 5`, `TIE = 1`, `DE = 0`, `exposure.type = "binary"`, `exposure.prevalence = 0.5`, `n.mc = 5000`, `min.variability = 0.2`, `stage.links`: density 0.3, strength 0.3 |
+
+## 12. Assumptions and limitations
+
+- Dependence is a Gaussian copula: linear on the latent scale; nonlinear and
+  tail dependence are not reproduced.
+- Within-view dependence is low-rank, and cross-view dependence is limited to
+  the $r$ estimated shared directions; crosstalk scales them but cannot create
+  new ones.
+- Simulated values stay within the template's observed range.
+- Samples are independent; repeated measures must be reduced to one sample per
+  subject.
+- Small templates give noisy shared structure and shallow calibration curves.
+- Planted outcomes are controlled experiments, not imitations of the real
+  outcome mechanism.
+- Mediation does not include confounders, survival outcomes or count data with
+  library sizes.
+
+## References
+
+- Daniel RM, De Stavola BL, Cousens SN, Vansteelandt S (2015). Causal mediation
+  analysis with multiple mediators. *Biometrics* 71:1-14.
+- Friedman JH (1991). Multivariate adaptive regression splines. *Annals of
+  Statistics* 19:1-67.
+- Horn JL (1965). A rationale and test for the number of factors in factor
+  analysis. *Psychometrika* 30:179-185.
+- Kettenring JR (1971). Canonical analysis of several sets of variables.
+  *Biometrika* 58:433-451.
+- Zappia L, Phipson B, Oshlack A (2017). Splatter: simulation of single-cell
+  RNA sequencing data. *Genome Biology* 18:174.

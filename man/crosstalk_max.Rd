@@ -4,10 +4,10 @@
 \alias{crosstalk_max}
 \title{Largest valid crosstalk weight}
 \usage{
-crosstalk_max(tmpl, per.view = FALSE)
+crosstalk_max(template, per.view = FALSE)
 }
 \arguments{
-\item{tmpl}{A \code{mimesys_template}.}
+\item{template}{A \code{mimesys_template}.}
 
 \item{per.view}{Return one limit per view instead of the overall scalar
 limit.}
@@ -23,7 +23,7 @@ is \eqn{1 / \sigma_{max}(B_m)^2}, which is always at least 1.
 }
 \examples{
 data(stelzer_mae)
-tmpl <- fit_template(stelzer_mae, shared.rank = 2)
-crosstalk_max(tmpl)
-crosstalk_max(tmpl, per.view = TRUE)
+template <- fit_template(stelzer_mae, shared.rank = 2)
+crosstalk_max(template)
+crosstalk_max(template, per.view = TRUE)
 }

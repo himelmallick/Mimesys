@@ -7,12 +7,12 @@
 validate_template(
   template,
   p = NULL,
-  nsample = NULL,
+  n = NULL,
   nrep = 5,
-  crosstalk_grid = seq(0, 1, by = 0.25),
-  max_features_per_view = 100,
+  crosstalk.grid = seq(0, 1, by = 0.25),
+  max.features.per.view = 100,
   view.models = NULL,
-  template_args = list(),
+  template.args = list(),
   seed = 1234
 )
 }
@@ -22,14 +22,14 @@ validate_template(
 
 \item{p}{Feature counts for validation simulation. See \code{\link[=sim_from_template]{sim_from_template()}}.}
 
-\item{nsample}{Number of samples per null validation replicate. Defaults to
+\item{n}{Number of samples per null validation replicate. Defaults to
 the template sample size.}
 
 \item{nrep}{Number of null replicates used in calibration.}
 
-\item{crosstalk_grid}{Candidate crosstalk values.}
+\item{crosstalk.grid}{Candidate crosstalk values.}
 
-\item{max_features_per_view}{Optional cap for detailed correlation and
+\item{max.features.per.view}{Optional cap for detailed correlation and
 marginal diagnostics: the most variable observed features of each view are
 kept, and the same features are used for the simulated data. This does
 not alter the calibration, which uses all matched features by default.}
@@ -37,7 +37,7 @@ not alter the calibration, which uses all matched features by default.}
 \item{view.models}{Optional named vector of per-view observation models
 passed to \code{\link[=sim_from_template]{sim_from_template()}}.}
 
-\item{template_args}{Named list passed to \code{\link[=fit_template]{fit_template()}} for raw input.}
+\item{template.args}{Named list passed to \code{\link[=fit_template]{fit_template()}} for raw input.}
 
 \item{seed}{Random seed.}
 }
@@ -58,8 +58,8 @@ or plotted with \code{\link[=plot_template_validation]{plot_template_validation(
 data(stelzer_mae)
 tmpl <- fit_template(stelzer_mae, shared.rank = 2)
 report <- validate_template(
-    tmpl, nrep = 1, crosstalk_grid = c(0, 0.5, 1),
-    max_features_per_view = 20
+    tmpl, nrep = 1, crosstalk.grid = c(0, 0.5, 1),
+    max.features.per.view = 20
 )
 report
 report$marginal_diagnostics

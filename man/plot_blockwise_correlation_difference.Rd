@@ -28,7 +28,7 @@ Plot observed-vs-simulated block correlation differences
 \examples{
 data(stelzer_mae)
 tmpl <- fit_template(stelzer_mae, shared.rank = 2)
-sim <- gen_simmba(nsample = 53, template = tmpl, nrep = 1, seed = 1)
+sim <- gen_simmba(n = 53, template = tmpl, nrep = 1, seed = 1)
 obs <- summarize_blockwise_feature_correlation(
     blockwise_feature_correlation(tmpl$observed)
 )

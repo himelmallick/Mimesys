@@ -132,7 +132,7 @@ dataset at the selected value and compares it with the template data.
 
 ```{r validate}
 grid <- seq(0, crosstalk_max(template), length.out = 6)
-report <- validate_template(template, nrep = 3, crosstalk_grid = grid, seed = 1)
+report <- validate_template(template, nrep = 3, crosstalk.grid = grid, seed = 1)
 report
 report$correlation_structure
 report$marginal_diagnostics
@@ -157,7 +157,7 @@ empirical cross-view correlation blocks.
 
 ```{r calibrate}
 crosstalk_max(template)
-cal <- calibrate_crosstalk(template, crosstalk_grid = grid, nrep = 3, seed = 1)
+cal <- calibrate_crosstalk(template, crosstalk.grid = grid, nrep = 3, seed = 1)
 cal$best_crosstalk
 cal$selection_frequency
 cal$near_optimal[, c("crosstalk", "mean")]
@@ -213,7 +213,7 @@ sim_mae <- simulate_mimesys(
     p = 30,
     crosstalk = cal$best_crosstalk,
     outcome = list(type = "binary", prevalence = 0.3),
-    signal = list(share = c(1, 1, 1), de_prob = 0.2),
+    signal = list(share = c(1, 1, 1), prob = 0.2),
     seed = 1
 )
 table(sim_mae$Y, sim_mae$split)
@@ -248,29 +248,29 @@ computed.
 ```{r scenarios}
 run <- function(...) {
     gen_simmba(
-        nsample = 200, template = template, p = 30,
-        crosstalk = cal$best_crosstalk, de.prob = 0.2, nrep = 1, seed = 2, ...
+        n = 200, template = template, p = 30,
+        crosstalk = cal$best_crosstalk, signal.prob = 0.2, nrep = 1, seed = 2, ...
     )
 }
 sims <- list(
-    linear = run(ygen.mode = "LM", signal.share = c(1, 1, 1)),
-    friedman2 = run(ygen.mode = "Friedman2", nonlinear.weight = 0.5),
-    shared = run(ygen.mode = "SharedLatent"),
-    interaction = run(ygen.mode = "Interaction", interaction.weight = 1)
+    linear = run(outcome.model = "linear", signal.share = c(1, 1, 1)),
+    friedman2 = run(outcome.model = "friedman2", nonlinear.weight = 0.5),
+    shared = run(outcome.model = "shared_latent"),
+    interaction = run(outcome.model = "interaction", interaction.weight = 1)
 )
 vapply(sims, function(s) {
     sum(s$trainDat$Rep_1$feature_metadata$outcome_feature)
 }, integer(1))
 ```
 
-- **Linear** (`"LM"`): additive per-view effects; `signal.share` sets each
+- **Linear** (`"linear"`): additive per-view effects; `signal.share` sets each
   view's share of signal variance.
-- **Nonlinear** (`"Friedman"`, `"Friedman2"`): the Friedman function of five
+- **Nonlinear** (`"friedman"`, `"friedman2"`): the Friedman function of five
   spiked features, alone or mixed with the linear part by `nonlinear.weight`.
-- **Shared latent** (`"SharedLatent"`): the outcome depends on the shared
+- **Shared latent** (`"shared_latent"`): the outcome depends on the shared
   cross-view factors, not on individual features, so no feature is marked in
   `outcome_feature`.
-- **Cross-view interaction** (`"Interaction"`): products of feature pairs
+- **Cross-view interaction** (`"interaction"`): products of feature pairs
   from different views. With `interaction.weight = 1` there are no main
   effects, so only methods that model views jointly can recover the signal.
 
@@ -347,7 +347,7 @@ methods. Any view and any feature can be a mediator.
 
 ```{r mediation}
 med <- gen_mediation(
-    nsample = 1000,
+    n = 1000,
     template = template,
     p = 30,
     n.mediators = c(CYTOF = 3, Metabolomics = 3, Proteomics = 0),
@@ -389,7 +389,7 @@ effects and lists the links between mediators:
 
 ```{r sequential-mediation}
 seq_med <- gen_mediation(
-    nsample = 500,
+    n = 500,
     template = template,
     p = 30,
     n.mediators = c(CYTOF = 3, Metabolomics = 3, Proteomics = 0),
@@ -412,7 +412,7 @@ the link, with the views still correlated through crosstalk), and
 # Interpretation notes
 
 Crosstalk controls cross-view dependence among the simulated features. Signal
-sharing controls how much outcome signal each view carries, and `de.align`
+sharing controls how much outcome signal each view carries, and `signal.align`
 controls whether spiked effects follow the shared cross-view direction. These
 are related but not interchangeable: high crosstalk can make views redundant,
 and the benefit of integration is largest when the signal is spread so that

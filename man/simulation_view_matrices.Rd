@@ -31,7 +31,7 @@ Extract view-specific matrices from a simulated MimeSys replicate
 \examples{
 data(stelzer_mae)
 tmpl <- fit_template(stelzer_mae, shared.rank = 2)
-sim <- gen_simmba(nsample = 40, template = tmpl, nrep = 1, seed = 1)
+sim <- gen_simmba(n = 40, template = tmpl, nrep = 1, seed = 1)
 views <- simulation_view_matrices(sim, rep = 1, split = "train")
 vapply(views, dim, integer(2))
 }

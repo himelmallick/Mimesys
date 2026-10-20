@@ -5,7 +5,7 @@
 \title{Simulate null multiview data from a fitted template}
 \usage{
 sim_from_template(
-  tmpl,
+  template,
   n,
   p = NULL,
   crosstalk = 1,
@@ -17,7 +17,7 @@ sim_from_template(
 )
 }
 \arguments{
-\item{tmpl}{A \code{mimesys_template} from \code{fit_template()}.}
+\item{template}{A \code{mimesys_template} from \code{fit_template()}.}
 
 \item{n}{Number of samples to generate (need not match the template).}
 

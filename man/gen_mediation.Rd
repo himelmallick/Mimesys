@@ -5,7 +5,7 @@
 \title{Simulate multi-view mediation data from a template}
 \usage{
 gen_mediation(
-  nsample,
+  n,
   template,
   p = NULL,
   crosstalk = 1,
@@ -38,7 +38,7 @@ gen_mediation(
 )
 }
 \arguments{
-\item{nsample}{Number of samples per replicate.}
+\item{n}{Number of samples per replicate.}
 
 \item{template}{A fitted \code{mimesys_template} or input accepted by
 \code{\link[=fit_template]{fit_template()}}.}
@@ -273,7 +273,7 @@ power runs are matched on effect sizes.
 data(stelzer_mae)
 tmpl <- fit_template(stelzer_mae, shared.rank = 2, seed = 1)
 med <- gen_mediation(
-    nsample = 200, template = tmpl, p = 20,
+    n = 200, template = tmpl, p = 20,
     n.mediators = c(CYTOF = 2, Metabolomics = 2, Proteomics = 0),
     TIE = 0.5, DE = 0.2, n.mc = 2000, seed = 1
 )
@@ -285,7 +285,7 @@ fm[fm$mediator, c("featureType", "a_path", "a_effect", "b_path", "indirect")]
 
 ## Sequential mediation: exposure -> CyTOF -> metabolome -> outcome
 seq_med <- gen_mediation(
-    nsample = 200, template = tmpl, p = 20,
+    n = 200, template = tmpl, p = 20,
     n.mediators = c(CYTOF = 3, Metabolomics = 3, Proteomics = 0),
     stages = list(Immune = "CYTOF", Metabolic = "Metabolomics"),
     stage.links = list(type = "random", density = 0.5, strength = 0.3),

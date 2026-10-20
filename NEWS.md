@@ -1,5 +1,36 @@
 # MimeSys 0.99.0
 
+## Argument names made consistent (breaking)
+
+* The core functions now use one name for one concept, in `dot.case`:
+  `nsample` is now `n` in `gen_simmba()`, `gen_mediation()`,
+  `calibrate_crosstalk()` and `validate_template()` (as in
+  `sim_from_template()` and the wrappers); `tmpl` is now `template` in
+  `sim_from_template()` and `crosstalk_max()`; `crosstalk_grid`,
+  `max_features_per_view` and `template_args` are now `crosstalk.grid`,
+  `max.features.per.view` and `template.args` in `calibrate_crosstalk()` and
+  `validate_template()`; `shared.latent.fun` and `shared.latent.n_factors` are
+  now `shared.latent.function` and `shared.latent.n.factors` in `gen_simmba()`
+  (and in its result). The old names are no longer accepted. The option lists
+  of the MAE wrappers (`snake_case`) and the correlation-diagnostic functions
+  are unchanged.
+* Clearer names for the signal and outcome arguments of `gen_simmba()`:
+  `de.prob` -> `signal.prob`, `de.downProb` -> `signal.neg.prob`,
+  `de.facLoc` -> `effect.meanlog`, `de.facScale` -> `effect.sdlog`,
+  `de.align` -> `signal.align`, `ygen.mode` -> `outcome.model` (values now
+  `"linear"`, `"friedman"`, `"friedman2"`, `"shared_latent"`,
+  `"interaction"`, as in `simulate_mimesys()`), `p.train` -> `train.fraction`,
+  `surv.hscale` -> `baseline.hazard`; the result fields are renamed to match.
+  In `simulate_mimesys()`, the `signal` options are now `prob`, `neg_prob`,
+  `effect_meanlog`, `effect_sdlog`, `align` and `share`, and the outcome
+  option `surv_hscale` is now `baseline_hazard`.
+* README rewritten around parameter tables, with the outcome and mediation
+  models written out as equations.
+* Internal: code shared by `gen_simmba()`, `gen_mediation()` and the MAE
+  wrappers now lives in common helpers (argument checks, template
+  resolution, the logistic-intercept solver, and the wrappers' set-up,
+  provenance and output assembly). Results are unchanged.
+
 ## New: sequential mediation
 
 * `gen_mediation()` and `simulate_mediation()` gain `stages` (ordered stages

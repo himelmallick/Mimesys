@@ -33,7 +33,7 @@ of the observed correlation structure.
 \examples{
 data(stelzer_mae)
 tmpl <- fit_template(stelzer_mae, shared.rank = 2)
-cal <- calibrate_crosstalk(tmpl, crosstalk_grid = c(0, 0.5, 1), nrep = 2)
+cal <- calibrate_crosstalk(tmpl, crosstalk.grid = c(0, 0.5, 1), nrep = 2)
 if (requireNamespace("ggplot2", quietly = TRUE)) {
     plot_crosstalk_calibration(cal)
 }

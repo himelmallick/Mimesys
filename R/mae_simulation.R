@@ -15,7 +15,7 @@
 #' @examples
 #' data(stelzer_mae)
 #' tmpl <- fit_template(stelzer_mae, shared.rank = 2)
-#' sim <- gen_simmba(nsample = 40, template = tmpl, p = 10, nrep = 1, seed = 1)
+#' sim <- gen_simmba(n = 40, template = tmpl, p = 10, nrep = 1, seed = 1)
 #' as_mimesys_mae(sim, rep = 1, split = "train")
 #' @export
 as_mimesys_mae <- function(x, rep = 1, split = c("all", "train", "test")) {
@@ -146,9 +146,9 @@ as_mimesys_mae <- function(x, rep = 1, split = c("all", "train", "test")) {
 
 .mimesys_outcome_mode <- function(model) {
     lookup <- c(
-        linear = "LM", lm = "LM", friedman = "Friedman", friedman2 = "Friedman2",
-        shared_latent = "SharedLatent", sharedlatent = "SharedLatent",
-        interaction = "Interaction"
+        linear = "linear", lm = "linear", friedman = "friedman", friedman2 = "friedman2",
+        shared_latent = "shared_latent", sharedlatent = "shared_latent",
+        interaction = "interaction"
     )
     model <- tolower(as.character(model))
     if (length(model) != 1L || !model %in% names(lookup)) {
@@ -162,42 +162,42 @@ as_mimesys_mae <- function(x, rep = 1, split = c("all", "train", "test")) {
     presets <- list(
         default = list(
             description = "Aligned linear outcome with factor-based null simulation.",
-            outcome = list(model = "linear"), signal = list(alignment = 1), null_model = list()
+            outcome = list(model = "linear"), signal = list(align = 1), null_model = list()
         ),
         linear = list(
             description = "Aligned additive linear outcome.",
-            outcome = list(model = "linear"), signal = list(alignment = 1), null_model = list()
+            outcome = list(model = "linear"), signal = list(align = 1), null_model = list()
         ),
         friedman = list(
             description = "Nonlinear Friedman outcome from spiked observed features.",
-            outcome = list(model = "friedman"), signal = list(alignment = 1), null_model = list()
+            outcome = list(model = "friedman"), signal = list(align = 1), null_model = list()
         ),
         friedman2 = list(
             description = "Additive linear plus nonlinear Friedman outcome.",
-            outcome = list(model = "friedman2"), signal = list(alignment = 1), null_model = list()
+            outcome = list(model = "friedman2"), signal = list(align = 1), null_model = list()
         ),
         shared_latent = list(
             description = "Linear outcome from all selected shared latent factors.",
             outcome = list(model = "shared_latent",
                 shared_latent_function = "linear"),
-            signal = list(alignment = 1), null_model = list()
+            signal = list(align = 1), null_model = list()
         ),
         shared_latent_friedman = list(
             description = "Friedman outcome from the first five selected shared latent factors.",
             outcome = list(model = "shared_latent",
                 shared_latent_function = "friedman"),
-            signal = list(alignment = 1), null_model = list()
+            signal = list(align = 1), null_model = list()
         ),
         shared_latent_friedman2 = list(
             description = "Linear plus Friedman outcome from selected shared latent factors.",
             outcome = list(model = "shared_latent",
                 shared_latent_function = "friedman2"),
-            signal = list(alignment = 1), null_model = list()
+            signal = list(align = 1), null_model = list()
         ),
         interaction = list(
             description = "Linear plus cross-view feature-interaction outcome.",
             outcome = list(model = "interaction"),
-            signal = list(alignment = 1), null_model = list()
+            signal = list(align = 1), null_model = list()
         )
     )
     if (!preset %in% names(presets)) {
@@ -265,13 +265,13 @@ mimesys_presets <- function() {
         "calibration")
     fit <- calibrate_crosstalk(
         template = tmpl,
-        crosstalk_grid = calibration$grid,
-        nsample = calibration$nsample,
+        crosstalk.grid = calibration$grid,
+        n = calibration$nsample,
         nrep = calibration$nrep,
         p = p,
         feature.select = null_model$feature_select,
         feature.jitter = null_model$feature_jitter,
-        max_features_per_view = calibration$max_features_per_view,
+        max.features.per.view = calibration$max_features_per_view,
         view.models = null_model$view_models,
         ## Offset the seed so the calibration replicates do not share random
         ## numbers with the simulation that follows
@@ -320,28 +320,15 @@ simulate_mimesys_null <- function(template,
     seed = 1234,
     return_type = c("mae", "simulation")) {
     return_type <- match.arg(return_type)
-    .check_count(n, "n", min = 2L)
-    .check_count(nrep, "nrep", min = 1L)
     ## Seed everything (template fitting, calibration, simulation) and restore
     ## the caller's random-number state on exit.
     if (!is.null(seed)) withr::local_seed(seed)
-    null_defaults <- list(
-        feature_select = "random", feature_jitter = 0.2,
-        view_models = NULL, back_transform = FALSE
-    )
-    null_model <- .mimesys_merge_options(null_model, null_defaults,
-        "null_model")
-    if (!is.list(template_args)) stop("template_args must be a named list.",
-        call. = FALSE)
-    tmpl <- if (inherits(template, "mimesys_template")) {
-        template
-    } else {
-        do.call(fit_template, c(list(template = template), template_args))
-    }
-    resolved <- .mimesys_resolve_crosstalk(
-        tmpl, n = as.integer(n), p = p, crosstalk = crosstalk,
-        calibration = calibration, null_model = null_model, seed = seed
-    )
+    setup <- .mimesys_wrapper_setup(template, n = n, p = p, nrep = nrep,
+        crosstalk = crosstalk, null_model = null_model,
+        template_args = template_args, calibration = calibration, seed = seed)
+    tmpl <- setup$template
+    null_model <- setup$null_model
+    resolved <- setup$crosstalk
     reps <- lapply(seq_len(as.integer(nrep)), function(i) {
         .sim_from_template_impl(
             tmpl = tmpl, n = as.integer(n), p = p, crosstalk = resolved$value,
@@ -355,21 +342,13 @@ simulate_mimesys_null <- function(template,
         purpose = "null", n = as.integer(n), p = p, nrep = as.integer(nrep),
         crosstalk = resolved$value, crosstalk_calibration = resolved$calibration,
         null_model = null_model, seed = seed,
-        provenance = list(
-            package_version = as.character(utils::packageVersion("MimeSys")),
-            created_at = format(Sys.time(), tz = "UTC", usetz = TRUE),
-            selected_crosstalk = resolved$value,
-            calibration_grid = if (is.null(resolved$calibration)) NULL else resolved$calibration$provenance$crosstalk_grid,
-            template = tmpl$provenance
-        )
+        provenance = .mimesys_wrapper_provenance(tmpl, resolved)
     )
     if (identical(return_type, "simulation")) {
         return(list(replicates = reps, settings = settings, template = tmpl))
     }
     maes <- lapply(reps, .mimesys_replicate_to_mae, simulation = settings)
-    if (length(maes) == 1L) return(maes[[1]])
-    structure(list(replicates = maes, settings = settings),
-        class = "mimesys_mae_simulation")
+    .mimesys_collect_maes(maes, settings)
 }
 
 #' Simulate multi-omics data with a compact MAE-first interface
@@ -396,11 +375,13 @@ simulate_mimesys_null <- function(template,
 #'   `model`, `type`, `snr`, `friedman_share`, `shared_latent_function`,
 #'   `shared_latent_n_factors`, `nonlinear_weight`, `interaction_weight`,
 #'   `n_interactions`, `prevalence` (binary target case proportion),
-#'   `surv_hscale`, `cens_rate` (survival target censoring proportion),
+#'   `baseline_hazard`, `cens_rate` (survival target censoring proportion),
 #'   `cens_lower`, and `cens_upper`. See [gen_simmba()].
-#' @param signal Named list controlling spike-ins. Options are `de_prob`,
-#'   `down_probability`, `effect_location`, `effect_scale`, `alignment`, and
-#'   `share`. By default, `alignment = 1`; supply `share` to enforce a desired
+#' @param signal Named list controlling spike-ins. Options are `prob`,
+#'   `neg_prob`, `effect_meanlog`, `effect_sdlog`, `align`, and `share`
+#'   (see `signal.prob`, `signal.neg.prob`, `effect.meanlog`, `effect.sdlog`,
+#'   `signal.align` and `signal.share` in [gen_simmba()]). By default,
+#'   `align = 1`; supply `share` to enforce a desired
 #'   relative contribution among views with nonzero spike-in signal.
 #' @param null_model Named list controlling null-data generation. Options are
 #'   `feature_select`, `feature_jitter`, `view_models`, and `back_transform`
@@ -445,17 +426,8 @@ simulate_mimesys <- function(template,
     return_type <- match.arg(return_type)
     .check_count(n, "n", min = 2L)
     .check_count(nrep, "nrep", min = 1L)
+    .check_prevalence(train_fraction, "train_fraction")
     if (!is.null(seed)) withr::local_seed(seed)
-    if (!is.numeric(n) || length(n) != 1L || !is.finite(n) || n < 2L) {
-        stop("n must be a single integer of at least 2.", call. = FALSE)
-    }
-    if (!is.numeric(train_fraction) || length(train_fraction) != 1L ||
-        !is.finite(train_fraction) || train_fraction <= 0 || train_fraction >= 1) {
-        stop("train_fraction must be strictly between 0 and 1.", call. = FALSE)
-    }
-    if (!is.numeric(nrep) || length(nrep) != 1L || nrep < 1L) {
-        stop("nrep must be a positive integer.", call. = FALSE)
-    }
     if (!is.character(preset) || length(preset) != 1L) {
         stop("preset must be a single preset name.", call. = FALSE)
     }
@@ -466,7 +438,7 @@ simulate_mimesys <- function(template,
         friedman_share = NULL, shared_latent_function = "linear",
         shared_latent_n_factors = NULL, nonlinear_weight = 0.5,
         interaction_weight = 0.5, n_interactions = NULL,
-        prevalence = 0.5, surv_hscale = 1,
+        prevalence = 0.5, baseline_hazard = 1,
         cens_rate = NULL, cens_lower = 1, cens_upper = 3
     )
     outcome_defaults <- utils::modifyList(outcome_defaults,
@@ -476,73 +448,48 @@ simulate_mimesys <- function(template,
     outcome$model <- .mimesys_outcome_mode(outcome$model)
 
     signal_defaults <- list(
-        de_prob = 0.1, down_probability = 0.5, effect_location = 1,
-        effect_scale = 0.4, alignment = 1, share = NULL
+        prob = 0.1, neg_prob = 0.5, effect_meanlog = 1,
+        effect_sdlog = 0.4, align = 1, share = NULL
     )
     signal_defaults <- utils::modifyList(signal_defaults,
         preset_settings$signal)
     signal <- .mimesys_merge_options(signal, signal_defaults, "signal")
 
-    null_defaults <- list(
-        feature_select = "random", feature_jitter = 0.2,
-        view_models = NULL, back_transform = FALSE
-    )
-    null_defaults <- utils::modifyList(null_defaults,
-        preset_settings$null_model)
-    null_model <- .mimesys_merge_options(null_model, null_defaults,
-        "null_model")
-    if (!is.list(template_args)) stop("template_args must be a named list.",
-        call. = FALSE)
-
-    fitted_template <- if (inherits(template, "mimesys_template")) {
-        template
-    } else {
-        do.call(fit_template, c(list(template = template), template_args))
-    }
-    resolved <- .mimesys_resolve_crosstalk(
-        fitted_template, n = as.integer(n), p = p, crosstalk = crosstalk,
-        calibration = calibration, null_model = null_model, seed = seed
-    )
+    setup <- .mimesys_wrapper_setup(template, n = n, p = p, nrep = nrep,
+        crosstalk = crosstalk, null_model = null_model,
+        template_args = template_args, calibration = calibration, seed = seed,
+        null_preset = preset_settings$null_model)
+    fitted_template <- setup$template
+    null_model <- setup$null_model
+    resolved <- setup$crosstalk
     sim <- gen_simmba(
-        nsample = as.integer(n), template = fitted_template, p = p, crosstalk = resolved$value,
+        n = as.integer(n), template = fitted_template, p = p, crosstalk = resolved$value,
         feature.select = null_model$feature_select,
         feature.jitter = null_model$feature_jitter,
         view.models = null_model$view_models,
         back.transform = isTRUE(null_model$back_transform),
-        snr = outcome$snr, p.train = train_fraction,
-        de.prob = signal$de_prob, de.downProb = signal$down_probability,
-        de.facLoc = signal$effect_location, de.facScale = signal$effect_scale,
-        de.align = signal$alignment, signal.share = signal$share,
-        friedman.share = outcome$friedman_share, ygen.mode = outcome$model,
-        shared.latent.fun = outcome$shared_latent_function,
-        shared.latent.n_factors = outcome$shared_latent_n_factors,
+        snr = outcome$snr, train.fraction = train_fraction,
+        signal.prob = signal$prob, signal.neg.prob = signal$neg_prob,
+        effect.meanlog = signal$effect_meanlog, effect.sdlog = signal$effect_sdlog,
+        signal.align = signal$align, signal.share = signal$share,
+        friedman.share = outcome$friedman_share, outcome.model = outcome$model,
+        shared.latent.function = outcome$shared_latent_function,
+        shared.latent.n.factors = outcome$shared_latent_n_factors,
         nonlinear.weight = outcome$nonlinear_weight,
         interaction.weight = outcome$interaction_weight,
         n.interactions = outcome$n_interactions,
         outcome.type = outcome$type, binary.prevalence = outcome$prevalence,
-        surv.hscale = outcome$surv_hscale, cens.rate = outcome$cens_rate,
+        baseline.hazard = outcome$baseline_hazard, cens.rate = outcome$cens_rate,
         cens.lower = outcome$cens_lower, cens.upper = outcome$cens_upper,
         nrep = as.integer(nrep), seed = seed
     )
     sim$crosstalk_calibration <- resolved$calibration
-    sim$provenance <- list(
-        package_version = as.character(utils::packageVersion("MimeSys")),
-        created_at = format(Sys.time(), tz = "UTC", usetz = TRUE),
-        purpose = "outcome",
-        preset = preset,
-        seed = seed,
-        selected_crosstalk = resolved$value,
-        calibration_grid = if (is.null(resolved$calibration)) NULL else resolved$calibration$provenance$crosstalk_grid,
-        template = fitted_template$provenance
-    )
+    sim$provenance <- .mimesys_wrapper_provenance(fitted_template, resolved,
+        purpose = "outcome", preset = preset, seed = seed)
     if (identical(return_type, "simulation")) return(sim)
 
     maes <- lapply(seq_len(sim$nrep), function(i) as_mimesys_mae(sim, rep = i))
-    if (length(maes) == 1L) return(maes[[1]])
-    structure(
-        list(replicates = maes, settings = .mimesys_simulation_settings(sim)),
-        class = "mimesys_mae_simulation"
-    )
+    .mimesys_collect_maes(maes, .mimesys_simulation_settings(sim))
 }
 
 #' @export
@@ -553,8 +500,8 @@ print.mimesys_mae_simulation <- function(x, ...) {
         cat("  Crosstalk: ", x$settings$provenance$selected_crosstalk, "\n",
             sep = "")
     }
-    if (!is.null(x$settings$ygen.mode)) {
-        cat("  Outcome: ", x$settings$ygen.mode, "\n", sep = "")
+    if (!is.null(x$settings$outcome.model)) {
+        cat("  Outcome: ", x$settings$outcome.model, "\n", sep = "")
     }
     invisible(x)
 }

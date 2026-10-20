@@ -377,7 +377,7 @@ print.mimesys_template <- function(x, ...) {
 
 #' Simulate null multiview data from a fitted template
 #'
-#' @param tmpl A \code{mimesys_template} from \code{fit_template()}.
+#' @param template A \code{mimesys_template} from \code{fit_template()}.
 #' @param n Number of samples to generate (need not match the template).
 #' @param p Feature counts per view. Use \code{NULL} to keep template sizes, a
 #'   single integer to use the same count for every view, an unnamed vector in
@@ -440,7 +440,7 @@ print.mimesys_template <- function(x, ...) {
 #' dim(null$feature_table)
 #' head(null$feature_metadata)
 #' @export
-sim_from_template <- function(tmpl, n, p = NULL, crosstalk = 1,
+sim_from_template <- function(template, n, p = NULL, crosstalk = 1,
     feature.select = c("random", "variance"),
     feature.jitter = 0.2,
     view.models = NULL,
@@ -448,7 +448,7 @@ sim_from_template <- function(tmpl, n, p = NULL, crosstalk = 1,
     seed = 1234) {
     .check_count(n, "n", min = 1L)
     if (!is.null(seed)) withr::local_seed(seed)
-    .sim_from_template_impl(tmpl, n = n, p = p, crosstalk = crosstalk,
+    .sim_from_template_impl(template, n = n, p = p, crosstalk = crosstalk,
         feature.select = feature.select, feature.jitter = feature.jitter,
         view.models = view.models, back.transform = back.transform)
 }
@@ -758,22 +758,22 @@ sim_from_template <- function(tmpl, n, p = NULL, crosstalk = 1,
 #' The construction needs \eqn{\gamma_m B_m B_m^T \le I}, so the limit for view
 #' m
 #' is \eqn{1 / \sigma_{max}(B_m)^2}, which is always at least 1.
-#' @param tmpl A \code{mimesys_template}.
+#' @param template A \code{mimesys_template}.
 #' @param per.view Return one limit per view instead of the overall scalar
 #'   limit.
 #' @return A single number (the smallest per-view limit) or, if
 #'   \code{per.view = TRUE}, a named numeric vector with one limit per view.
 #' @examples
 #' data(stelzer_mae)
-#' tmpl <- fit_template(stelzer_mae, shared.rank = 2)
-#' crosstalk_max(tmpl)
-#' crosstalk_max(tmpl, per.view = TRUE)
+#' template <- fit_template(stelzer_mae, shared.rank = 2)
+#' crosstalk_max(template)
+#' crosstalk_max(template, per.view = TRUE)
 #' @export
-crosstalk_max <- function(tmpl, per.view = FALSE) {
-    if (is.null(tmpl$B)) {
-        lim <- setNames(rep(Inf, length(tmpl$views)), tmpl$views)
+crosstalk_max <- function(template, per.view = FALSE) {
+    if (is.null(template$B)) {
+        lim <- setNames(rep(Inf, length(template$views)), template$views)
     } else {
-        lim <- vapply(tmpl$B, function(b) 1 / max(svd(b, nu = 0, nv = 0)$d)^2,
+        lim <- vapply(template$B, function(b) 1 / max(svd(b, nu = 0, nv = 0)$d)^2,
             numeric(1))
     }
     if (per.view) lim else min(lim)

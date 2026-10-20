@@ -7,13 +7,13 @@
 #'
 #' @param template A fitted \code{mimesys_template} or any object accepted by
 #'   \code{fit_template()}.
-#' @param crosstalk_grid Numeric vector of crosstalk values to evaluate.
-#' @param nsample Number of simulated samples per replicate.
+#' @param crosstalk.grid Numeric vector of crosstalk values to evaluate.
+#' @param n Number of simulated samples per replicate.
 #' @param nrep Number of replicates per crosstalk value.
 #' @param p Optional named integer vector of simulated features per view.
 #' @param feature.select,feature.jitter Feature-generation settings passed to
 #'   \code{sim_from_template()}.
-#' @param max_features_per_view Optional named cap used when computing
+#' @param max.features.per.view Optional named cap used when computing
 #'   correlation distances. If `NULL`, every matched empirical feature is used.
 #' @param view.models Optional named vector of per-view observation models
 #'   passed
@@ -37,27 +37,26 @@
 #' @examples
 #' data(stelzer_mae)
 #' tmpl <- fit_template(stelzer_mae, shared.rank = 2)
-#' cal <- calibrate_crosstalk(tmpl, crosstalk_grid = c(0, 0.5, 1), nrep = 2)
+#' cal <- calibrate_crosstalk(tmpl, crosstalk.grid = c(0, 0.5, 1), nrep = 2)
 #' cal$best_crosstalk
 #' cal$selection_frequency
 #' @export
 calibrate_crosstalk <- function(
     template,
-    crosstalk_grid = seq(0, 1, by = 0.25),
-    nsample = NULL,
+    crosstalk.grid = seq(0, 1, by = 0.25),
+    n = NULL,
     nrep = 5,
     p = NULL,
     feature.select = c("random", "variance"),
     feature.jitter = 0.2,
-    max_features_per_view = NULL,
+    max.features.per.view = NULL,
     view.models = NULL,
     seed = 1234,
     ...
 ) {
     feature.select <- match.arg(feature.select)
     if (!is.null(seed)) withr::local_seed(seed)
-    tmpl <- if (inherits(template,
-        "mimesys_template")) template else fit_template(template, ...)
+    tmpl <- .resolve_template(template, list(...))
     if (is.null(tmpl$observed)) {
         stop(
             "This fitted template does not retain its empirical matrices. Refit it with fit_template() before calibrating crosstalk.",
@@ -72,32 +71,32 @@ calibrate_crosstalk <- function(
         stop("calibrate_crosstalk() needs a template with at least two views.",
             call. = FALSE)
     }
-    if (is.null(nsample)) {
-        nsample <- tmpl$n0
+    if (is.null(n)) {
+        n <- tmpl$n0
     }
-    if (!is.numeric(crosstalk_grid) || length(crosstalk_grid) == 0L ||
-        any(!is.finite(crosstalk_grid)) || any(crosstalk_grid < 0)) {
-        stop("crosstalk_grid must be a vector of finite, non-negative numbers.",
+    if (!is.numeric(crosstalk.grid) || length(crosstalk.grid) == 0L ||
+        any(!is.finite(crosstalk.grid)) || any(crosstalk.grid < 0)) {
+        stop("crosstalk.grid must be a vector of finite, non-negative numbers.",
             call. = FALSE)
     }
-    crosstalk_grid <- sort(unique(crosstalk_grid))
+    crosstalk.grid <- sort(unique(crosstalk.grid))
     ct_limit <- crosstalk_max(tmpl)
     if (identical(as.integer(tmpl$shared.rank), 0L)) {
         warning("The template has no shared latent factors, so crosstalk has no effect ",
             "on the simulated data; calibration cannot distinguish grid values.",
             call. = FALSE)
     }
-    too_big <- crosstalk_grid > ct_limit + 1e-10
+    too_big <- crosstalk.grid > ct_limit + 1e-10
     if (any(too_big)) {
         warning(
-            "Dropping crosstalk_grid value(s) above crosstalk_max(template) = ",
-            sprintf("%.3f", ct_limit), ": ", paste(crosstalk_grid[too_big],
+            "Dropping crosstalk.grid value(s) above crosstalk_max(template) = ",
+            sprintf("%.3f", ct_limit), ": ", paste(crosstalk.grid[too_big],
                 collapse = ", "),
             call. = FALSE
         )
-        crosstalk_grid <- crosstalk_grid[!too_big]
-        if (length(crosstalk_grid) == 0L) {
-            stop("No crosstalk_grid values are within the valid range.",
+        crosstalk.grid <- crosstalk.grid[!too_big]
+        if (length(crosstalk.grid) == 0L) {
+            stop("No crosstalk.grid values are within the valid range.",
                 call. = FALSE)
         }
     }
@@ -113,15 +112,15 @@ calibrate_crosstalk <- function(
             ". Use a larger p or supply crosstalk as a number.", call. = FALSE)
     }
     .check_count(nrep, "nrep", min = 1L)
-    .check_count(nsample, "nsample", min = 3L)
+    .check_count(n, "n", min = 3L)
     obs_cache <- .mimesys_observed_cor_cache(observed_matrices)
 
     rows <- list()
     idx <- 1L
-    for (ct in crosstalk_grid) {
+    for (ct in crosstalk.grid) {
         pcl <- .sim_from_template_impl(
             tmpl = tmpl,
-            n = nsample,
+            n = n,
             p = p,
             crosstalk = ct,
             feature.select = feature.select,
@@ -133,7 +132,7 @@ calibrate_crosstalk <- function(
             ## generation or spike-in parameters enter crosstalk calibration.
             if (rep_idx > 1L) {
                 pcl <- .sim_from_template_impl(
-                    tmpl = tmpl, n = nsample, p = p, crosstalk = ct,
+                    tmpl = tmpl, n = n, p = p, crosstalk = ct,
                     feature.select = feature.select, feature.jitter = feature.jitter,
                     view.models = view.models
                 )
@@ -141,7 +140,7 @@ calibrate_crosstalk <- function(
             sim_mats <- .mimesys_pcl_view_matrices(pcl,
                 feature_names = "template_feature")
             aligned <- .mimesys_align_observed_simulated(observed_matrices,
-                sim_mats, max_features_per_view = max_features_per_view)
+                sim_mats, max_features_per_view = max.features.per.view)
             distances <- .mimesys_frobenius_blocks(aligned$observed,
                 aligned$simulated, observed_cache = obs_cache)
             distances$crosstalk <- ct
@@ -182,10 +181,10 @@ calibrate_crosstalk <- function(
     selection_frequency$crosstalk <- as.numeric(as.character(selection_frequency$crosstalk))
     selection_frequency$selection_frequency <- selection_frequency$n_selected / nrep
     best_ct <- best$crosstalk[[1]]
-    if (length(crosstalk_grid) > 1L && best_ct >= max(crosstalk_grid) &&
-        is.finite(ct_limit) && ct_limit - max(crosstalk_grid) > 0.1) {
+    if (length(crosstalk.grid) > 1L && best_ct >= max(crosstalk.grid) &&
+        is.finite(ct_limit) && ct_limit - max(crosstalk.grid) > 0.1) {
         warning(
-            "Best crosstalk (", best_ct, ") is at the upper end of crosstalk_grid; ",
+            "Best crosstalk (", best_ct, ") is at the upper end of crosstalk.grid; ",
             "the optimum may be larger. Consider extending the grid up to crosstalk_max(template) = ",
             sprintf("%.3f", ct_limit), ".",
             call. = FALSE
@@ -212,11 +211,11 @@ calibrate_crosstalk <- function(
             package_version = as.character(utils::packageVersion("MimeSys")),
             created_at = format(Sys.time(), tz = "UTC", usetz = TRUE),
             seed = seed,
-            crosstalk_grid = crosstalk_grid,
-            nsample = nsample,
+            crosstalk.grid = crosstalk.grid,
+            n = n,
             nrep = nrep,
             p = p,
-            max_features_per_view = max_features_per_view,
+            max.features.per.view = max.features.per.view,
             feature_select = feature.select,
             feature_jitter = feature.jitter
         )
@@ -257,7 +256,7 @@ calibrate_crosstalk <- function(
 #' @examples
 #' data(stelzer_mae)
 #' tmpl <- fit_template(stelzer_mae, shared.rank = 2)
-#' cal <- calibrate_crosstalk(tmpl, crosstalk_grid = c(0, 0.5, 1), nrep = 2)
+#' cal <- calibrate_crosstalk(tmpl, crosstalk.grid = c(0, 0.5, 1), nrep = 2)
 #' if (requireNamespace("ggplot2", quietly = TRUE)) {
 #'     plot_crosstalk_calibration(cal)
 #' }
@@ -334,7 +333,7 @@ plot_crosstalk_calibration <- function(
 #' @examples
 #' data(stelzer_mae)
 #' tmpl <- fit_template(stelzer_mae, shared.rank = 2)
-#' sim <- gen_simmba(nsample = 40, template = tmpl, p = 10, nrep = 2, seed = 1)
+#' sim <- gen_simmba(n = 40, template = tmpl, p = 10, nrep = 2, seed = 1)
 #' summarize_simulation(sim)
 #' @export
 summarize_simulation <- function(sim) {
@@ -401,13 +400,13 @@ summarize_simulation <- function(sim) {
         test_n = stats::setNames(test_n, names(sim$testDat)),
         feature_counts = feature_counts,
         crosstalk = sim$crosstalk,
-        ygen.mode = sim$ygen.mode,
+        outcome.model = sim$outcome.model,
         outcome.type = sim$outcome.type,
-        shared.latent.fun = sim$shared.latent.fun,
-        shared.latent.n_factors = sim$shared.latent.n_factors,
+        shared.latent.function = sim$shared.latent.function,
+        shared.latent.n.factors = sim$shared.latent.n.factors,
         signal.share = sim$signal.share,
         friedman.share = sim$friedman.share,
-        de.align = sim$de.align,
+        signal.align = sim$signal.align,
         active_features_first_rep = active_features,
         outcome_summary = summary(outcome_values),
         prevalence = prevalence,
@@ -429,10 +428,10 @@ print.mimesys_simulation_summary <- function(x, ...) {
     cat("  Features: ", paste(names(x$feature_counts), x$feature_counts,
         sep = "=", collapse = ", "), "\n", sep = "")
     cat("  Crosstalk: ", paste(x$crosstalk, collapse = ", "), "\n", sep = "")
-    cat("  Outcome: ", x$outcome.type, " | ", x$ygen.mode, "\n", sep = "")
-    if (identical(x$ygen.mode, "SharedLatent")) {
-        shared_fun <- if (is.null(x$shared.latent.fun)) "linear" else x$shared.latent.fun
-        shared_n <- if (is.null(x$shared.latent.n_factors)) "all" else x$shared.latent.n_factors
+    cat("  Outcome: ", x$outcome.type, " | ", x$outcome.model, "\n", sep = "")
+    if (identical(x$outcome.model, "shared_latent")) {
+        shared_fun <- if (is.null(x$shared.latent.function)) "linear" else x$shared.latent.function
+        shared_n <- if (is.null(x$shared.latent.n.factors)) "all" else x$shared.latent.n.factors
         cat("  Shared latent function: ", shared_fun, "\n", sep = "")
         cat("  Shared latent factors: ", shared_n, "\n", sep = "")
     }
@@ -468,7 +467,7 @@ print.mimesys_simulation_summary <- function(x, ...) {
 #' @examples
 #' data(stelzer_mae)
 #' tmpl <- fit_template(stelzer_mae, shared.rank = 2)
-#' sim <- gen_simmba(nsample = 53, template = tmpl, nrep = 1, seed = 1)
+#' sim <- gen_simmba(n = 53, template = tmpl, nrep = 1, seed = 1)
 #' simulated <- simulation_view_matrices(sim, feature_names =
 #' "template_feature")
 #' feature_correlation_frobenius(tmpl$observed, simulated)

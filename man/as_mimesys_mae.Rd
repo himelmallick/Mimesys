@@ -27,6 +27,6 @@ is stored in the \code{rowData()} of each assay.
 \examples{
 data(stelzer_mae)
 tmpl <- fit_template(stelzer_mae, shared.rank = 2)
-sim <- gen_simmba(nsample = 40, template = tmpl, p = 10, nrep = 1, seed = 1)
+sim <- gen_simmba(n = 40, template = tmpl, p = 10, nrep = 1, seed = 1)
 as_mimesys_mae(sim, rep = 1, split = "train")
 }

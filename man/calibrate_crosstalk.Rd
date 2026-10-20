@@ -6,13 +6,13 @@
 \usage{
 calibrate_crosstalk(
   template,
-  crosstalk_grid = seq(0, 1, by = 0.25),
-  nsample = NULL,
+  crosstalk.grid = seq(0, 1, by = 0.25),
+  n = NULL,
   nrep = 5,
   p = NULL,
   feature.select = c("random", "variance"),
   feature.jitter = 0.2,
-  max_features_per_view = NULL,
+  max.features.per.view = NULL,
   view.models = NULL,
   seed = 1234,
   ...
@@ -22,9 +22,9 @@ calibrate_crosstalk(
 \item{template}{A fitted \code{mimesys_template} or any object accepted by
 \code{fit_template()}.}
 
-\item{crosstalk_grid}{Numeric vector of crosstalk values to evaluate.}
+\item{crosstalk.grid}{Numeric vector of crosstalk values to evaluate.}
 
-\item{nsample}{Number of simulated samples per replicate.}
+\item{n}{Number of simulated samples per replicate.}
 
 \item{nrep}{Number of replicates per crosstalk value.}
 
@@ -33,7 +33,7 @@ calibrate_crosstalk(
 \item{feature.select, feature.jitter}{Feature-generation settings passed to
 \code{sim_from_template()}.}
 
-\item{max_features_per_view}{Optional named cap used when computing
+\item{max.features.per.view}{Optional named cap used when computing
 correlation distances. If \code{NULL}, every matched empirical feature is used.}
 
 \item{view.models}{Optional named vector of per-view observation models
@@ -69,7 +69,7 @@ given when the best value sits at the upper end of the grid.
 \examples{
 data(stelzer_mae)
 tmpl <- fit_template(stelzer_mae, shared.rank = 2)
-cal <- calibrate_crosstalk(tmpl, crosstalk_grid = c(0, 0.5, 1), nrep = 2)
+cal <- calibrate_crosstalk(tmpl, crosstalk.grid = c(0, 0.5, 1), nrep = 2)
 cal$best_crosstalk
 cal$selection_frequency
 }

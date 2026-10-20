@@ -5,7 +5,7 @@
 \title{Generate simulated multi-omics data}
 \usage{
 gen_simmba(
-  nsample,
+  n,
   template,
   p = NULL,
   crosstalk = 1,
@@ -13,23 +13,23 @@ gen_simmba(
   feature.jitter = 0.2,
   view.models = NULL,
   snr = 1,
-  p.train = 0.7,
-  de.prob = 0.1,
-  de.downProb = 0.5,
-  de.facLoc = 1,
-  de.facScale = 0.4,
-  de.align = NULL,
+  train.fraction = 0.7,
+  signal.prob = 0.1,
+  signal.neg.prob = 0.5,
+  effect.meanlog = 1,
+  effect.sdlog = 0.4,
+  signal.align = NULL,
   signal.share = NULL,
   friedman.share = NULL,
-  ygen.mode = c("LM", "Friedman", "Friedman2", "SharedLatent", "Interaction"),
-  shared.latent.fun = c("linear", "friedman", "friedman2"),
-  shared.latent.n_factors = NULL,
+  outcome.model = c("linear", "friedman", "friedman2", "shared_latent", "interaction"),
+  shared.latent.function = c("linear", "friedman", "friedman2"),
+  shared.latent.n.factors = NULL,
   nonlinear.weight = 0.5,
   interaction.weight = 0.5,
   n.interactions = NULL,
   outcome.type = c("continuous", "binary", "survival"),
   binary.prevalence = 0.5,
-  surv.hscale = 1,
+  baseline.hazard = 1,
   cens.rate = NULL,
   cens.lower = 1,
   cens.upper = 3,
@@ -41,7 +41,7 @@ gen_simmba(
 )
 }
 \arguments{
-\item{nsample}{Number of samples to simulate in each replicate before the
+\item{n}{Number of samples to simulate in each replicate before the
 train/test split.}
 
 \item{template}{Either a \code{mimesys_template} from \code{fit_template()}
@@ -82,29 +82,25 @@ latent-scale meaning: \code{Var(eta) / (pi^2 / 3)} for the logistic latent
 variable and \code{Var(eta) / (pi^2 / 6)} for the log event time. Larger
 values create easier prediction tasks.}
 
-\item{p.train}{Proportion of samples assigned to the training split.}
+\item{train.fraction}{Proportion of samples assigned to the training split.}
 
-\item{de.prob}{Probability that a feature receives a nonzero spike-in
+\item{signal.prob}{Probability that a feature receives a nonzero spike-in
 coefficient; scalar, one value per view, or named by view. Every view with
-\code{de.prob > 0} gets at least one nonzero coefficient; use 0 for a view
+\code{signal.prob > 0} gets at least one nonzero coefficient; use 0 for a view
 that should carry no linear signal.}
 
-\item{de.downProb}{Probability that a nonzero spike-in coefficient is
+\item{signal.neg.prob}{Probability that a nonzero spike-in coefficient is
 negative; scalar or one value per view.}
 
-\item{de.facLoc}{Location parameter for the log-normal effect-size factor;
-scalar or one value per view.}
+\item{effect.meanlog, effect.sdlog}{Mean and SD on the log scale of the
+log-normal effect-size factor \eqn{f}; a signal coefficient is
+\eqn{\pm |\log_2 f|}. Scalar or one value per view.}
 
-\item{de.facScale}{Scale parameter for the log-normal effect-size factor;
-scalar or one value per view.}
-
-\item{de.align}{NULL keeps the original spike-in (DE positions and signs
-drawn
-independently per view). A value between 0 and 1 places that fraction of DE
-features on features loading on the shared cross-view direction (sampled
-with
-probability proportional to the squared loading) with signs following that
-direction, so view-specific signals agree to the extent the views
+\item{signal.align}{NULL draws signal positions and signs independently per
+view. A value between 0 and 1 places that fraction of the signal features
+on features loading on the shared cross-view direction (sampled with
+probability proportional to the squared loading), with signs following
+that direction, so view-specific signals agree to the extent the views
 cross-talk.}
 
 \item{signal.share}{Optional numeric vector controlling the relative marginal
@@ -118,8 +114,8 @@ balanced complementary-signal setting where no view is intended to
 dominate.}
 
 \item{friedman.share}{Optional numeric vector controlling which views supply
-the five nonlinear Friedman features when \code{ygen.mode} is
-\code{"Friedman"} or \code{"Friedman2"}: a single value, one value per view
+the five nonlinear Friedman features when \code{outcome.model} is
+\code{"friedman"} or \code{"friedman2"}: a single value, one value per view
 or a vector named by view, normalized to sum to one. Each of the five
 features comes from a view chosen with probability equal to its share
 (regardless of how many candidate features the view has), then uniformly
@@ -127,16 +123,16 @@ among that view's spiked features. If NULL, \code{signal.share} is used
 when available; otherwise the five features are sampled uniformly from all
 spiked features.}
 
-\item{ygen.mode}{Y generation mode: "LM", "Friedman", "Friedman2",
-"SharedLatent", or "Interaction". Friedman modes apply the Friedman formula
+\item{outcome.model}{Outcome model: "linear", "friedman", "friedman2",
+"shared_latent", or "interaction". Friedman models apply the Friedman formula
 after rank-transforming the selected simulated features to the unit
-interval; "Friedman2" mixes it with the linear predictor using
-\code{nonlinear.weight}. "SharedLatent" uses the simulated shared latent
-factors. "Interaction" mixes the linear predictor with products of feature
+interval; "friedman2" mixes it with the linear predictor using
+\code{nonlinear.weight}. "shared_latent" uses the simulated shared latent
+factors. "interaction" mixes the linear predictor with products of feature
 pairs taken from different views, using \code{interaction.weight}.}
 
-\item{shared.latent.fun}{Response function used when
-\code{ygen.mode = "SharedLatent"}. \code{"linear"} combines selected shared
+\item{shared.latent.function}{Response function used when
+\code{outcome.model = "shared_latent"}. \code{"linear"} combines selected shared
 latent factors as a standardized equal-weight score, preserving the
 previous
 behavior. \code{"friedman"} applies the Friedman nonlinear function to the
@@ -144,22 +140,22 @@ first five selected shared latent factors after rank-transforming them to
 the unit interval. \code{"friedman2"} mixes the linear shared-latent score
 with the Friedman nonlinear component using \code{nonlinear.weight}.}
 
-\item{shared.latent.n_factors}{Number of shared latent factors to use for
-\code{ygen.mode = "SharedLatent"}. If \code{NULL}, all available shared
+\item{shared.latent.n.factors}{Number of shared latent factors to use for
+\code{outcome.model = "shared_latent"}. If \code{NULL}, all available shared
 factors are used. Friedman shared-latent functions require at least five
 selected shared factors.}
 
 \item{nonlinear.weight}{Share of signal variance from the nonlinear Friedman
-part, between 0 and 1, for \code{ygen.mode = "Friedman2"} and
-\code{shared.latent.fun = "friedman2"}. Both parts are standardized and
+part, between 0 and 1, for \code{outcome.model = "friedman2"} and
+\code{shared.latent.function = "friedman2"}. Both parts are standardized and
 combined as \code{sqrt(1 - w) * linear + sqrt(w) * nonlinear}.}
 
 \item{interaction.weight}{Share of signal variance from cross-view
-interactions, between 0 and 1, for \code{ygen.mode = "Interaction"}.
+interactions, between 0 and 1, for \code{outcome.model = "interaction"}.
 \code{1} gives a pure interaction outcome with no main effects.}
 
 \item{n.interactions}{Number of cross-view feature pairs for
-\code{ygen.mode = "Interaction"}. Defaults to the number of view pairs.
+\code{outcome.model = "interaction"}. Defaults to the number of view pairs.
 Pairs cycle over view pairs; each feature is drawn from that view's
 nonzero-coefficient features when available.}
 
@@ -171,7 +167,7 @@ nonzero-coefficient features when available.}
 The logistic intercept is solved in each replicate so that the expected
 prevalence equals this value.}
 
-\item{surv.hscale}{Multiplicative scale on the baseline hazard for survival
+\item{baseline.hazard}{Multiplicative scale on the baseline hazard for survival
 outcomes.}
 
 \item{cens.rate}{Optional target censoring proportion for survival outcomes.
@@ -219,7 +215,7 @@ splits the data into training and testing sets.
 The ground truth for which features drive the outcome is in
 \code{feature_metadata$outcome_feature}. \code{beta} is nonzero only for
 features that enter the outcome through the linear predictor; in
-\code{"Friedman"}, \code{"SharedLatent"} and pure-interaction outcomes it
+\code{"friedman"}, \code{"shared_latent"} and pure-interaction outcomes it
 is
 zero for every feature. \code{friedman_term} and \code{interaction_term}
 mark the nonlinear and interaction features, and
@@ -242,8 +238,8 @@ samples together) on the scale they were simulated on.
 data(stelzer_mae)
 tmpl <- fit_template(stelzer_mae, shared.rank = 2)
 sim <- gen_simmba(
-    nsample = 60, template = tmpl, p = 10, nrep = 2,
-    ygen.mode = "Interaction", outcome.type = "binary", seed = 1
+    n = 60, template = tmpl, p = 10, nrep = 2,
+    outcome.model = "interaction", outcome.type = "binary", seed = 1
 )
 head(sim$trainDat$Rep_1$sample_metadata)
 sim$trainDat$Rep_1$truth$interaction_pairs

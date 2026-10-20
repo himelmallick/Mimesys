@@ -43,12 +43,14 @@ the preset.}
 \code{model}, \code{type}, \code{snr}, \code{friedman_share}, \code{shared_latent_function},
 \code{shared_latent_n_factors}, \code{nonlinear_weight}, \code{interaction_weight},
 \code{n_interactions}, \code{prevalence} (binary target case proportion),
-\code{surv_hscale}, \code{cens_rate} (survival target censoring proportion),
+\code{baseline_hazard}, \code{cens_rate} (survival target censoring proportion),
 \code{cens_lower}, and \code{cens_upper}. See \code{\link[=gen_simmba]{gen_simmba()}}.}
 
-\item{signal}{Named list controlling spike-ins. Options are \code{de_prob},
-\code{down_probability}, \code{effect_location}, \code{effect_scale}, \code{alignment}, and
-\code{share}. By default, \code{alignment = 1}; supply \code{share} to enforce a desired
+\item{signal}{Named list controlling spike-ins. Options are \code{prob},
+\code{neg_prob}, \code{effect_meanlog}, \code{effect_sdlog}, \code{align}, and \code{share}
+(see \code{signal.prob}, \code{signal.neg.prob}, \code{effect.meanlog}, \code{effect.sdlog},
+\code{signal.align} and \code{signal.share} in \code{\link[=gen_simmba]{gen_simmba()}}). By default,
+\code{align = 1}; supply \code{share} to enforce a desired
 relative contribution among views with nonzero spike-in signal.}
 
 \item{null_model}{Named list controlling null-data generation. Options are

@@ -15,18 +15,18 @@ test_that("template simulator preserves requested structure", {
     expect_equal(dim(tm$observed$mrna), dim(template$mrna))
     expect_equal(dim(tm$observed$protein), dim(template$protein))
     sim <- gen_simmba(
-        nsample = 80,
+        n = 80,
         template = tm,
         p = c(mrna = 25, protein = 15),
         crosstalk = 0.5,
-        de.align = 1,
+        signal.align = 1,
         nrep = 2,
         seed = 11
     )
 
     expect_null(sim$template)
     expect_true(is.list(sim$template_provenance))
-    kept <- gen_simmba(nsample = 30, template = tm, nrep = 1, seed = 1,
+    kept <- gen_simmba(n = 30, template = tm, nrep = 1, seed = 1,
         return.template = TRUE)
     expect_s3_class(kept$template, "mimesys_template")
     expect_length(sim$trainDat, 2)
@@ -155,7 +155,7 @@ test_that("named presets are discoverable and can be overridden", {
         outcome = list(model = "linear"),
         template_args = list(rank = 2, shared.rank = 1), seed = 109
     )
-    expect_equal(S4Vectors::metadata(sim_mae)$simulation$ygen.mode, "LM")
+    expect_equal(S4Vectors::metadata(sim_mae)$simulation$outcome.model, "linear")
 })
 
 test_that("feature counts can be scalar, positional, or named by view", {
@@ -219,11 +219,11 @@ test_that("Friedman outcomes can control nonlinear signal allocation by view", {
 
     tm <- fit_template(template, rank = 2, shared.rank = 1)
     sim <- gen_simmba(
-        nsample = 60,
+        n = 60,
         template = tm,
         p = c(mrna = 8, protein = 8),
-        ygen.mode = "Friedman",
-        de.prob = 1,
+        outcome.model = "friedman",
+        signal.prob = 1,
         friedman.share = c(mrna = 1, protein = 0),
         nrep = 1,
         seed = 121
@@ -269,10 +269,10 @@ test_that("shared latent outcome mode generates finite shared signals", {
 
     tm <- fit_template(template, rank = 3, shared.rank = 1)
     late_sim <- gen_simmba(
-        nsample = 80,
+        n = 80,
         template = tm,
         p = c(mrna = 12, protein = 12),
-        ygen.mode = "SharedLatent",
+        outcome.model = "shared_latent",
         crosstalk = 1,
         nrep = 1,
         seed = 131
@@ -299,10 +299,10 @@ test_that("shared latent outcome uses all available shared factors", {
 
     tm <- fit_template(template, rank = 4, shared.rank = 2)
     sim <- gen_simmba(
-        nsample = 80,
+        n = 80,
         template = tm,
         p = c(mrna = 12, protein = 12),
-        ygen.mode = "SharedLatent",
+        outcome.model = "shared_latent",
         crosstalk = 1,
         nrep = 1,
         seed = 141
@@ -342,34 +342,34 @@ test_that("shared latent outcome can use selected factors and nonlinear function
 
     tm <- fit_template(template, rank = 6, shared.rank = 5)
     sim_linear_3 <- gen_simmba(
-        nsample = 80,
+        n = 80,
         template = tm,
         p = c(mrna = 14, protein = 14),
-        ygen.mode = "SharedLatent",
-        shared.latent.fun = "linear",
-        shared.latent.n_factors = 3,
+        outcome.model = "shared_latent",
+        shared.latent.function = "linear",
+        shared.latent.n.factors = 3,
         crosstalk = 1,
         nrep = 1,
         seed = 151
     )
     sim_friedman <- gen_simmba(
-        nsample = 80,
+        n = 80,
         template = tm,
         p = c(mrna = 14, protein = 14),
-        ygen.mode = "SharedLatent",
-        shared.latent.fun = "friedman",
-        shared.latent.n_factors = 5,
+        outcome.model = "shared_latent",
+        shared.latent.function = "friedman",
+        shared.latent.n.factors = 5,
         crosstalk = 1,
         nrep = 1,
         seed = 151
     )
     sim_friedman2 <- gen_simmba(
-        nsample = 80,
+        n = 80,
         template = tm,
         p = c(mrna = 14, protein = 14),
-        ygen.mode = "SharedLatent",
-        shared.latent.fun = "friedman2",
-        shared.latent.n_factors = 5,
+        outcome.model = "shared_latent",
+        shared.latent.function = "friedman2",
+        shared.latent.n.factors = 5,
         crosstalk = 1,
         nrep = 1,
         seed = 151
@@ -387,8 +387,8 @@ test_that("shared latent outcome can use selected factors and nonlinear function
     names(expected_all) <- id_all
     expected <- unname(expected_all[sim_linear_3$trainDat[[1]]$sample_metadata$subjectID])
 
-    expect_equal(sim_linear_3$shared.latent.fun, "linear")
-    expect_equal(sim_linear_3$shared.latent.n_factors, 3)
+    expect_equal(sim_linear_3$shared.latent.function, "linear")
+    expect_equal(sim_linear_3$shared.latent.n.factors, 3)
     expect_equal(sim_linear_3$trainDat[[1]]$sample_metadata$Xbeta_shared,
         expected, tolerance = 1e-8)
     expect_true(all(is.finite(sim_friedman$trainDat[[1]]$sample_metadata$Xbeta_shared)))
@@ -416,11 +416,11 @@ test_that("nonlinear shared latent outcomes require five shared factors", {
     tm <- fit_template(template, rank = 4, shared.rank = 2)
     expect_error(
         gen_simmba(
-            nsample = 60,
+            n = 60,
             template = tm,
             p = c(mrna = 12, protein = 12),
-            ygen.mode = "SharedLatent",
-            shared.latent.fun = "friedman",
+            outcome.model = "shared_latent",
+            shared.latent.function = "friedman",
             crosstalk = 1,
             nrep = 1,
             seed = 161
@@ -440,7 +440,7 @@ test_that("simulation summaries report key settings", {
         seq_len(n))
 
     sim <- gen_simmba(
-        nsample = 60,
+        n = 60,
         template = fit_template(template, rank = 2, shared.rank = 1),
         p = 6,
         crosstalk = 0.25,
@@ -584,8 +584,8 @@ test_that("binary outcomes hit the target prevalence regardless of feature scale
 
     for (prev in c(0.2, 0.5)) {
         sim <- gen_simmba(
-            nsample = 400, template = tm, outcome.type = "binary",
-            binary.prevalence = prev, de.prob = 0.5, nrep = 4, seed = 2
+            n = 400, template = tm, outcome.type = "binary",
+            binary.prevalence = prev, signal.prob = 0.5, nrep = 4, seed = 2
         )
         rates <- vapply(seq_len(4), function(k) {
             y <- c(sim$trainDat[[k]]$sample_metadata$Y,
@@ -601,7 +601,7 @@ test_that("binary outcomes hit the target prevalence regardless of feature scale
 
     ## Both views contribute on standardized features: neither predictor is
     ## orders of magnitude larger than the other
-    sim <- gen_simmba(nsample = 300, template = tm, de.prob = 0.5, nrep = 1,
+    sim <- gen_simmba(n = 300, template = tm, signal.prob = 0.5, nrep = 1,
         seed = 3)
     d <- rbind(t(as.matrix(sim$trainDat[[1]]$feature_table)))
     fm <- sim$trainDat[[1]]$feature_metadata
@@ -613,8 +613,8 @@ test_that("binary outcomes hit the target prevalence regardless of feature scale
     expect_lt(max(v) / min(v), 50)
 
     fr <- gen_simmba(
-        nsample = 400, template = tm, outcome.type = "binary", ygen.mode = "Friedman",
-        de.prob = 0.5, nrep = 1, seed = 4
+        n = 400, template = tm, outcome.type = "binary", outcome.model = "friedman",
+        signal.prob = 0.5, nrep = 1, seed = 4
     )
     y <- c(fr$trainDat[[1]]$sample_metadata$Y,
         fr$testDat[[1]]$sample_metadata$Y)
@@ -634,25 +634,25 @@ test_that("survival outcomes are finite and censoring can be targeted", {
     rownames(template$a) <- rownames(template$b) <- paste0("S", seq_len(n))
     tm <- fit_template(template, rank = 2, shared.rank = 1)
 
-    sim <- gen_simmba(nsample = 300, template = tm, outcome.type = "survival",
-        de.prob = 0.5, nrep = 2, seed = 5)
+    sim <- gen_simmba(n = 300, template = tm, outcome.type = "survival",
+        signal.prob = 0.5, nrep = 2, seed = 5)
     sm <- sim$trainDat[[1]]$sample_metadata
     expect_true(all(is.finite(sm$time)) && all(sm$time > 0))
     expect_true(all(sm$status %in% c(0L, 1L)))
     expect_true(mean(sm$status) > 0 && mean(sm$status) < 1)
 
     for (rate in c(0, 0.3, 0.6)) {
-        sim <- gen_simmba(nsample = 500, template = tm,
+        sim <- gen_simmba(n = 500, template = tm,
             outcome.type = "survival",
-            cens.rate = rate, de.prob = 0.5, nrep = 1, seed = 6)
+            cens.rate = rate, signal.prob = 0.5, nrep = 1, seed = 6)
         status <- c(sim$trainDat[[1]]$sample_metadata$status,
             sim$testDat[[1]]$sample_metadata$status)
         expect_true(abs(mean(status == 0) - rate) < 0.02)
     }
-    expect_error(gen_simmba(nsample = 50, template = tm,
+    expect_error(gen_simmba(n = 50, template = tm,
         outcome.type = "survival",
         cens.rate = 1, nrep = 1), "cens.rate")
-    expect_error(gen_simmba(nsample = 50, template = tm,
+    expect_error(gen_simmba(n = 50, template = tm,
         outcome.type = "binary",
         binary.prevalence = 0, nrep = 1), "binary.prevalence")
 })
@@ -670,7 +670,7 @@ test_that("MAE interface passes prevalence and censoring options through", {
     tm <- fit_template(template, rank = 2, shared.rank = 1)
     mae <- simulate_mimesys(tm, n = 400, crosstalk = 1,
         outcome = list(type = "binary", prevalence = 0.25),
-        signal = list(de_prob = 0.5))
+        signal = list(prob = 0.5))
     y <- SummarizedExperiment::colData(mae)$Y
     expect_true(abs(mean(y) - 0.25) < 0.08)
     sim <- simulate_mimesys(tm, n = 50, crosstalk = 1,
@@ -727,11 +727,11 @@ test_that("blockwise feature-correlation diagnostics support matrices and simula
 
     tm <- fit_template(matrices, rank = 2, shared.rank = 1)
     sim <- gen_simmba(
-        nsample = 40,
+        n = 40,
         template = tm,
         p = c(mrna = 3, protein = 2),
         crosstalk = 0.5,
-        de.align = 1,
+        signal.align = 1,
         nrep = 1,
         seed = 44
     )
@@ -787,16 +787,16 @@ test_that("calibration and validation reports retain uncertainty diagnostics", {
     tm <- fit_template(template, rank = 2, shared.rank = 1)
 
     calibration <- calibrate_crosstalk(
-        tm, crosstalk_grid = c(0, 0.5, 1), nsample = 40, nrep = 2,
-        p = 6, max_features_per_view = 5, seed = 73
+        tm, crosstalk.grid = c(0, 0.5, 1), n = 40, nrep = 2,
+        p = 6, max.features.per.view = 5, seed = 73
     )
     expect_equal(sum(calibration$selection_frequency$selection_frequency), 1)
     expect_gte(nrow(calibration$near_optimal), 1)
     expect_true(is.list(calibration$provenance))
 
     report <- suppressWarnings(validate_template(
-        tm, p = 6, nsample = 40, nrep = 1,
-        crosstalk_grid = c(0, 0.5), max_features_per_view = 5, seed = 74
+        tm, p = 6, n = 40, nrep = 1,
+        crosstalk.grid = c(0, 0.5), max.features.per.view = 5, seed = 74
     ))
     expect_true(all(report$marginal_diagnostics$mean_ks >= 0 & report$marginal_diagnostics$mean_ks <= 1))
     expect_true(all(c("mean_ks", "median_ks",
@@ -857,21 +857,21 @@ test_that("calibration uses the fitted scale and respects the valid crosstalk ra
             real_align(observed_matrices, simulated_matrices, ...)
         }
     )
-    calibrate_crosstalk(x, crosstalk_grid = c(0, 1), nrep = 1, seed = 3,
+    calibrate_crosstalk(x, crosstalk.grid = c(0, 1), nrep = 1, seed = 3,
         rank = 2, shared.rank = 1, view.transform = c(b = "log1p"))
     expect_equal(unname(seen$b), unname(log1p(x$b)))
 
     lim <- crosstalk_max(tm)
     expect_warning(
-        cal <- calibrate_crosstalk(tm, crosstalk_grid = c(0, 1, lim + 1),
+        cal <- calibrate_crosstalk(tm, crosstalk.grid = c(0, 1, lim + 1),
             nrep = 1, seed = 1),
-        "Dropping crosstalk_grid"
+        "Dropping crosstalk.grid"
     )
     expect_false(any(cal$raw$crosstalk > lim))
     expect_error(
-        suppressWarnings(calibrate_crosstalk(tm, crosstalk_grid = lim + 1,
+        suppressWarnings(calibrate_crosstalk(tm, crosstalk.grid = lim + 1,
             nrep = 1)),
-        "No crosstalk_grid values"
+        "No crosstalk.grid values"
     )
 })
 
@@ -889,28 +889,28 @@ test_that("outcome_feature and beta describe the features that drive the outcome
     {
     tm <- fit_template(.mk_template(53), rank = 2, shared.rank = 1)
     run <- function(mode, ...) {
-        s <- gen_simmba(nsample = 120, template = tm, ygen.mode = mode,
-            de.prob = 0.4,
+        s <- gen_simmba(n = 120, template = tm, outcome.model = mode,
+            signal.prob = 0.4,
             nrep = 1, seed = 2, ...)
         s$trainDat[[1]]$feature_metadata
     }
-    lm_fm <- run("LM")
+    lm_fm <- run("linear")
     expect_true(any(lm_fm$beta != 0))
     expect_identical(lm_fm$outcome_feature, lm_fm$beta != 0)
 
-    fr <- run("Friedman")
+    fr <- run("friedman")
     expect_true(all(fr$beta == 0))
     expect_identical(fr$outcome_feature, fr$friedman_term)
     expect_equal(sum(fr$friedman_term), 5)
 
-    fr2 <- run("Friedman2")
+    fr2 <- run("friedman2")
     expect_identical(fr2$outcome_feature, fr2$beta != 0 | fr2$friedman_term)
 
-    sl <- run("SharedLatent")
+    sl <- run("shared_latent")
     expect_true(all(sl$beta == 0))
     expect_false(any(sl$outcome_feature))
 
-    it <- run("Interaction", interaction.weight = 1)
+    it <- run("interaction", interaction.weight = 1)
     expect_true(all(it$beta == 0))
     expect_identical(it$outcome_feature, it$interaction_term)
 })
@@ -918,22 +918,22 @@ test_that("outcome_feature and beta describe the features that drive the outcome
 test_that("nonlinear.weight mixes standardized linear and Friedman parts", {
     tm <- fit_template(.mk_template(54), rank = 2, shared.rank = 1)
     ## w = 0: Xbeta is the standardized linear part; w = 1: the standardized Friedman part
-    full0 <- gen_simmba(nsample = 150, template = tm, ygen.mode = "Friedman2",
-        de.prob = 0.4,
+    full0 <- gen_simmba(n = 150, template = tm, outcome.model = "friedman2",
+        signal.prob = 0.4,
         nonlinear.weight = 0, nrep = 1, seed = 3)
     all0 <- rbind(full0$trainDat[[1]]$sample_metadata,
         full0$testDat[[1]]$sample_metadata)
     expect_equal(all0$Xbeta, as.numeric(scale(all0$Xbeta_linear)),
         tolerance = 1e-8)
-    full1 <- gen_simmba(nsample = 150, template = tm, ygen.mode = "Friedman2",
-        de.prob = 0.4,
+    full1 <- gen_simmba(n = 150, template = tm, outcome.model = "friedman2",
+        signal.prob = 0.4,
         nonlinear.weight = 1, nrep = 1, seed = 3)
     all1 <- rbind(full1$trainDat[[1]]$sample_metadata,
         full1$testDat[[1]]$sample_metadata)
     expect_equal(all1$Xbeta, as.numeric(scale(all1$Xbeta_friedman)),
         tolerance = 1e-8)
     expect_equal(stats::var(all1$Xbeta), 1, tolerance = 1e-8)
-    expect_error(gen_simmba(nsample = 50, template = tm, nonlinear.weight = 2,
+    expect_error(gen_simmba(n = 50, template = tm, nonlinear.weight = 2,
         nrep = 1),
         "nonlinear.weight")
 })
@@ -942,8 +942,8 @@ test_that("cross-view interaction outcomes use feature pairs from different view
     {
     tm <- fit_template(.mk_template(55, p = c(a = 10, b = 10, c = 10)),
         rank = 2, shared.rank = 1)
-    s <- gen_simmba(nsample = 200, template = tm, ygen.mode = "Interaction",
-        interaction.weight = 1, de.prob = 0.3, nrep = 1, seed = 4)
+    s <- gen_simmba(n = 200, template = tm, outcome.model = "interaction",
+        interaction.weight = 1, signal.prob = 0.3, nrep = 1, seed = 4)
     tr <- s$trainDat[[1]]
     pairs <- tr$truth$interaction_pairs
     expect_equal(nrow(pairs), 3)
@@ -956,28 +956,28 @@ test_that("cross-view interaction outcomes use feature pairs from different view
     expect_equal(all_sm$Xbeta, as.numeric(scale(all_sm$Xbeta_interaction)),
         tolerance = 1e-8)
 
-    s2 <- gen_simmba(nsample = 200, template = tm, ygen.mode = "Interaction",
+    s2 <- gen_simmba(n = 200, template = tm, outcome.model = "interaction",
         n.interactions = 5, nrep = 1, seed = 4)
     expect_equal(nrow(s2$trainDat[[1]]$truth$interaction_pairs), 5)
 
     one <- fit_template(list(a = .mk_template(56)$a), rank = 2)
-    expect_error(gen_simmba(nsample = 50, template = one,
-        ygen.mode = "Interaction", nrep = 1),
+    expect_error(gen_simmba(n = 50, template = one,
+        outcome.model = "interaction", nrep = 1),
         "at least two views")
 })
 
 test_that("input guards for shared-latent and train/test settings", {
     tm <- fit_template(.mk_template(57), rank = 2, shared.rank = 1)
     expect_warning(
-        gen_simmba(nsample = 60, template = tm, ygen.mode = "SharedLatent",
+        gen_simmba(n = 60, template = tm, outcome.model = "shared_latent",
             crosstalk = 0, nrep = 1),
         "unrelated to the features"
     )
-    expect_error(gen_simmba(nsample = 10, template = tm, p.train = 0.99,
+    expect_error(gen_simmba(n = 10, template = tm, train.fraction = 0.99,
         nrep = 1),
         "empty training or test set")
-    expect_error(gen_simmba(nsample = 10, template = tm, p.train = 1, nrep = 1),
-        "p.train")
+    expect_error(gen_simmba(n = 10, template = tm, train.fraction = 1, nrep = 1),
+        "train.fraction")
 })
 
 test_that("back.transform returns views on their original measurement scale", {
@@ -1012,7 +1012,7 @@ test_that("back.transform returns views on their original measurement scale", {
     expect_true(any(t(as.matrix(fitted$feature_table))[,
         fm$featureType == "comp"] < 0))
 
-    sim <- gen_simmba(nsample = 100, template = tm, nrep = 1, seed = 1,
+    sim <- gen_simmba(n = 100, template = tm, nrep = 1, seed = 1,
         back.transform = TRUE)
     expect_true(all(sim$trainDat[[1]]$feature_metadata$scale == "original"))
     expect_true(all(sim$trainDat[[1]]$feature_table >= 0))
@@ -1050,7 +1050,7 @@ test_that("simulate_mimesys returns the original scale by default", {
 test_that("calibration picks the value with the smallest mean over cross-view blocks", {
     tm <- fit_template(.mk_template(61, p = c(a = 10, b = 10, c = 10)), rank = 2,
         shared.rank = 1, seed = 1)
-    cal <- calibrate_crosstalk(tm, crosstalk_grid = c(0, 0.5, 1), nrep = 3, seed = 2)
+    cal <- calibrate_crosstalk(tm, crosstalk.grid = c(0, 0.5, 1), nrep = 3, seed = 2)
     by_rep <- stats::aggregate(rescaled_frobenius ~ crosstalk + rep,
         data = cal$raw[!cal$raw$diagonal_block, ], FUN = mean)
     overall <- stats::aggregate(rescaled_frobenius ~ crosstalk, data = by_rep, FUN = mean)
@@ -1089,12 +1089,12 @@ test_that("per-view arguments are matched by name and checked", {
     expect_error(sim_from_template(tm, n = 10, crosstalk = c(1, 0.5)), "length 1 or one value per view")
     expect_error(sim_from_template(tm, n = 10, crosstalk = c(a = 1, z = 1, b = 1)), "unknown view")
     expect_error(fit_template(x, view.transform = c(aa = "log1p")), "unknown view")
-    g <- gen_simmba(nsample = 60, template = tm, de.prob = c(c = 0, a = 0.5, b = 0), nrep = 1, seed = 1)
+    g <- gen_simmba(n = 60, template = tm, signal.prob = c(c = 0, a = 0.5, b = 0), nrep = 1, seed = 1)
     fm <- g$trainDat[[1]]$feature_metadata
     expect_true(all(fm$beta[fm$featureType %in% c("b", "c")] == 0))
-    expect_error(gen_simmba(nsample = 50, template = tm, de.prob = 1.5, nrep = 1), "de.prob")
-    expect_error(gen_simmba(nsample = 50, template = tm, de.align = 2, nrep = 1), "de.align")
-    expect_error(gen_simmba(nsample = 50, template = tm, nrep = 0), "nrep")
+    expect_error(gen_simmba(n = 50, template = tm, signal.prob = 1.5, nrep = 1), "signal.prob")
+    expect_error(gen_simmba(n = 50, template = tm, signal.align = 2, nrep = 1), "signal.align")
+    expect_error(gen_simmba(n = 50, template = tm, nrep = 0), "nrep")
 })
 
 test_that("input problems give clear messages", {
@@ -1115,13 +1115,13 @@ test_that("input problems give clear messages", {
 
 test_that("zero-weight components are not marked as outcome features", {
     tm <- fit_template(.mk_template(65), rank = 2, shared.rank = 1, seed = 1)
-    it <- gen_simmba(nsample = 80, template = tm, ygen.mode = "Interaction",
-        interaction.weight = 0, de.prob = 0.4, nrep = 1, seed = 1)
+    it <- gen_simmba(n = 80, template = tm, outcome.model = "interaction",
+        interaction.weight = 0, signal.prob = 0.4, nrep = 1, seed = 1)
     fm <- it$trainDat[[1]]$feature_metadata
     expect_false(any(fm$interaction_term))
     expect_null(it$trainDat[[1]]$truth$interaction_pairs)
-    fr <- gen_simmba(nsample = 80, template = tm, ygen.mode = "Friedman2",
-        nonlinear.weight = 0, de.prob = 0.4, nrep = 1, seed = 1)
+    fr <- gen_simmba(n = 80, template = tm, outcome.model = "friedman2",
+        nonlinear.weight = 0, signal.prob = 0.4, nrep = 1, seed = 1)
     expect_false(any(fr$trainDat[[1]]$feature_metadata$friedman_term))
 })
 
@@ -1137,23 +1137,23 @@ test_that("single-view templates skip calibration", {
 
 test_that("summaries describe binary, survival and Friedman outcomes", {
     tm <- fit_template(.mk_template(67), rank = 2, shared.rank = 1, seed = 1)
-    sv <- gen_simmba(nsample = 100, template = tm, outcome.type = "survival",
-        cens.rate = 0.3, de.prob = 0.4, nrep = 2, seed = 1)
+    sv <- gen_simmba(n = 100, template = tm, outcome.type = "survival",
+        cens.rate = 0.3, signal.prob = 0.4, nrep = 2, seed = 1)
     ss <- summarize_simulation(sv)
     expect_equal(mean(ss$event_rate), 0.7, tolerance = 0.02)
     expect_true(is.finite(ss$y_signal_cor_mean))
-    bn <- summarize_simulation(gen_simmba(nsample = 100, template = tm, outcome.type = "binary",
-        binary.prevalence = 0.3, de.prob = 0.4, nrep = 2, seed = 1))
+    bn <- summarize_simulation(gen_simmba(n = 100, template = tm, outcome.type = "binary",
+        binary.prevalence = 0.3, signal.prob = 0.4, nrep = 2, seed = 1))
     expect_true(abs(mean(bn$prevalence) - 0.3) < 0.1)
-    fr <- summarize_simulation(gen_simmba(nsample = 100, template = tm, ygen.mode = "Friedman",
-        de.prob = 0.4, nrep = 1, seed = 1))
+    fr <- summarize_simulation(gen_simmba(n = 100, template = tm, outcome.model = "friedman",
+        signal.prob = 0.4, nrep = 1, seed = 1))
     expect_equal(fr$active_features_first_rep, 5)
 })
 
 test_that("views keep template order and large-mean features are standardized", {
     x <- .mk_template(68, p = c(zeta = 6, alpha = 6))
     tm <- fit_template(x, rank = 2, shared.rank = 1, seed = 1)
-    sim <- gen_simmba(nsample = 40, template = tm, nrep = 1, seed = 1)
+    sim <- gen_simmba(n = 40, template = tm, nrep = 1, seed = 1)
     expect_identical(names(simulation_view_matrices(sim)), c("zeta", "alpha"))
     testthat::skip_if_not_installed("MultiAssayExperiment")
     mae <- as_mimesys_mae(sim)
@@ -1185,8 +1185,8 @@ test_that("shared.rank cannot exceed the smallest within-view rank", {
     expect_error(fit_template(x, rank = 3, shared.rank = 4), "smallest within-view rank")
     tm <- fit_template(x, rank = 3, shared.rank = 3, seed = 1)
     expect_equal(tm$shared.rank, 3L)
-    expect_error(gen_simmba(nsample = 30, template = tm, p = c(a = 2, b = 2),
-        ygen.mode = "Friedman", nrep = 1), "at least five")
+    expect_error(gen_simmba(n = 30, template = tm, p = c(a = 2, b = 2),
+        outcome.model = "friedman", nrep = 1), "at least five")
 })
 
 test_that("simulated compositions never exceed the template total", {
@@ -1226,15 +1226,15 @@ test_that("simulated compositions never exceed the template total", {
     expect_equal(unname(totals(s3)), rep(1, 300), tolerance = 1e-8)
 })
 
-test_that("every view with de.prob > 0 carries at least one signal feature", {
+test_that("every view with signal.prob > 0 carries at least one signal feature", {
     tm <- fit_template(.mk_template(73, p = c(a = 3, b = 3)), rank = 1, shared.rank = 1, seed = 1)
     zero <- vapply(seq_len(30), function(s) {
-        g <- gen_simmba(nsample = 40, template = tm, de.prob = 0.05, nrep = 1, seed = s)
+        g <- gen_simmba(n = 40, template = tm, signal.prob = 0.05, nrep = 1, seed = s)
         fm <- g$trainDat[[1]]$feature_metadata
         any(tapply(fm$beta != 0, fm$featureType, sum) == 0)
     }, logical(1))
     expect_false(any(zero))
-    g <- gen_simmba(nsample = 40, template = tm, de.prob = c(a = 0.5, b = 0), nrep = 1, seed = 1)
+    g <- gen_simmba(n = 40, template = tm, signal.prob = c(a = 0.5, b = 0), nrep = 1, seed = 1)
     fm <- g$trainDat[[1]]$feature_metadata
     expect_true(all(fm$beta[fm$featureType == "b"] == 0))
 })
@@ -1256,7 +1256,7 @@ test_that("stability selection repeats the shared-rank choice", {
 test_that("gen_mediation plants mediators and returns calibrated truth", {
     tm <- fit_template(.mk_template(80, p = c(a = 12, b = 12, c = 12)), rank = 2,
         shared.rank = 1, seed = 1)
-    g <- gen_mediation(nsample = 300, template = tm, n.mediators = c(a = 2, b = 2, c = 0),
+    g <- gen_mediation(n = 300, template = tm, n.mediators = c(a = 2, b = 2, c = 0),
         TIE = 0.6, DE = 0.3, n.mc = 1000, nrep = 2, seed = 1)
     expect_length(g$replicates, 2)
     r <- g$replicates[[1]]
@@ -1273,7 +1273,7 @@ test_that("gen_mediation plants mediators and returns calibrated truth", {
     expect_true(all(r$sample_metadata$exposure %in% c(0, 1)))
     expect_true(all(is.finite(r$sample_metadata$Y)))
     ## Negative direction flips the sign
-    neg <- gen_mediation(nsample = 100, template = tm, n.mediators = 2, TIE = 0.5,
+    neg <- gen_mediation(n = 100, template = tm, n.mediators = 2, TIE = 0.5,
         dir.b = -1, n.mc = 500, seed = 2)
     expect_equal(neg$replicates[[1]]$truth$mediation$NIE, -0.5, tolerance = 1e-8)
 })
@@ -1281,7 +1281,7 @@ test_that("gen_mediation plants mediators and returns calibrated truth", {
 test_that("mediation effects are recovered by product of coefficients", {
     tm <- fit_template(.mk_template(81, n = 150, p = c(a = 10, b = 10)), rank = 2,
         shared.rank = 1, seed = 1)
-    g <- gen_mediation(nsample = 2000, template = tm, n.mediators = 2, TIE = 1, DE = 0.5,
+    g <- gen_mediation(n = 2000, template = tm, n.mediators = 2, TIE = 1, DE = 0.5,
         n.mc = 2000, nrep = 3, seed = 3)
     est <- vapply(g$replicates, function(r) {
         sm <- r$sample_metadata
@@ -1298,7 +1298,7 @@ test_that("mediation effects are recovered by product of coefficients", {
 test_that("null mediation scenarios have zero true indirect effect", {
     tm <- fit_template(.mk_template(82), rank = 2, shared.rank = 1, seed = 1)
     for (et in c("null_a", "null_b", "null_ab")) {
-        g <- gen_mediation(nsample = 100, template = tm, n.mediators = 2, TIE = 1,
+        g <- gen_mediation(n = 100, template = tm, n.mediators = 2, TIE = 1,
             effect.type = et, n.mc = 500, seed = 4)
         fm <- g$replicates[[1]]$feature_metadata
         expect_equal(g$replicates[[1]]$truth$mediation$NIE, 0)
@@ -1309,18 +1309,18 @@ test_that("null mediation scenarios have zero true indirect effect", {
 
 test_that("mediation supports continuous exposure, random directions and interactions", {
     tm <- fit_template(.mk_template(83), rank = 2, shared.rank = 1, seed = 1)
-    g <- gen_mediation(nsample = 150, template = tm, n.mediators = 3, TIE = 0.6,
+    g <- gen_mediation(n = 150, template = tm, n.mediators = 3, TIE = 0.6,
         exposure.type = "continuous", dir.a = "random", n.interactions = 2,
         n.mc = 500, seed = 5)
     tr <- g$replicates[[1]]$truth$mediation
     expect_equal(tr$pathway_effect_total, 0.6, tolerance = 1e-8)
     expect_equal(nrow(tr$interaction_pairs), 2)
     expect_false(all(g$replicates[[1]]$sample_metadata$exposure %in% c(0, 1)))
-    expect_error(gen_mediation(nsample = 50, template = tm, n.mediators = 1, TIE = 5,
+    expect_error(gen_mediation(n = 50, template = tm, n.mediators = 1, TIE = 5,
         n.mc = 500), "too large")
-    expect_error(gen_mediation(nsample = 50, template = tm, n.mediators = c(a = 0, b = 0),
+    expect_error(gen_mediation(n = 50, template = tm, n.mediators = c(a = 0, b = 0),
         n.mc = 500), "At least one mediator")
-    expect_error(gen_mediation(nsample = 50, template = tm, dir.a = 2, n.mc = 500), "dir.a")
+    expect_error(gen_mediation(n = 50, template = tm, dir.a = 2, n.mc = 500), "dir.a")
 })
 
 test_that("simulate_mediation returns an MAE with mediation truth", {
@@ -1339,7 +1339,7 @@ test_that("simulate_mediation returns an MAE with mediation truth", {
 
 test_that("mediation with a binary outcome hits prevalence and reports risk-scale truth", {
     tm <- fit_template(.mk_template(85), rank = 2, shared.rank = 1, seed = 1)
-    g <- gen_mediation(nsample = 2000, template = tm, n.mediators = 2, TIE = 0.8, DE = 0.4,
+    g <- gen_mediation(n = 2000, template = tm, n.mediators = 2, TIE = 0.8, DE = 0.4,
         outcome.type = "binary", outcome.prevalence = 0.3, n.mc = 2000, seed = 6)
     r <- g$replicates[[1]]
     tr <- r$truth$mediation
@@ -1351,19 +1351,19 @@ test_that("mediation with a binary outcome hits prevalence and reports risk-scal
     rd <- tr$binary$risk_difference
     expect_equal(unname(rd["TE"]), unname(rd["NIE"] + rd["NDE"]), tolerance = 1e-10)
     expect_true(all(tr$binary$odds_ratio > 1))
-    expect_error(gen_mediation(nsample = 50, template = tm, outcome.type = "binary",
+    expect_error(gen_mediation(n = 50, template = tm, outcome.type = "binary",
         outcome.prevalence = 1, n.mc = 500), "outcome.prevalence")
 })
 
 test_that("continuous exposure reports the linear-projection indirect effect", {
     tm <- fit_template(.mk_template(86), rank = 2, shared.rank = 1, seed = 1)
-    g <- gen_mediation(nsample = 100, template = tm, n.mediators = 2, TIE = 0.5,
+    g <- gen_mediation(n = 100, template = tm, n.mediators = 2, TIE = 0.5,
         exposure.type = "continuous", n.mc = 1000, seed = 7)
     tr <- g$replicates[[1]]$truth$mediation
     fm <- g$replicates[[1]]$feature_metadata
     expect_true(is.finite(tr$NIE_linear))
     expect_equal(tr$NIE_linear, sum(fm$b_path * fm$a_slope), tolerance = 1e-8)
-    gb <- gen_mediation(nsample = 100, template = tm, n.mediators = 2, TIE = 0.5,
+    gb <- gen_mediation(n = 100, template = tm, n.mediators = 2, TIE = 0.5,
         n.mc = 1000, seed = 7)
     expect_equal(gb$replicates[[1]]$truth$mediation$NIE_linear, 0.5, tolerance = 1e-8)
 })
@@ -1405,7 +1405,7 @@ test_that("mediation truth covers closure effects, matched nulls and random inte
     x <- list(comp = comp, other = other)
     for (v in names(x)) rownames(x[[v]]) <- paste0("S", seq_len(n))
     tm <- fit_template(x, rank = 2, shared.rank = 1, seed = 1)
-    g <- gen_mediation(nsample = 50, template = tm, n.mediators = c(comp = 2, other = 2),
+    g <- gen_mediation(n = 50, template = tm, n.mediators = c(comp = 2, other = 2),
         TIE = 1, n.mc = 1000, seed = 1)
     fm <- g$replicates[[1]]$feature_metadata
     non_med_comp <- fm$featureType == "comp" & !fm$mediator
@@ -1414,16 +1414,16 @@ test_that("mediation truth covers closure effects, matched nulls and random inte
     expect_true(all(abs(fm$exposure_effect[non_med_other]) < 1e-10))
     expect_equal(fm$exposure_effect[fm$mediator], fm$a_effect[fm$mediator])
 
-    sp <- gen_mediation(nsample = 50, template = tm, n.mediators = c(comp = 0, other = 3),
+    sp <- gen_mediation(n = 50, template = tm, n.mediators = c(comp = 0, other = 3),
         TIE = 0.8, n.mc = 1000, seed = 2)
-    na <- gen_mediation(nsample = 50, template = tm, n.mediators = c(comp = 0, other = 3),
+    na <- gen_mediation(n = 50, template = tm, n.mediators = c(comp = 0, other = 3),
         TIE = 0.8, effect.type = "null_a", n.mc = 1000, seed = 2)
     fs <- sp$replicates[[1]]$feature_metadata
     fa <- na$replicates[[1]]$feature_metadata
     expect_equal(fa$b_path[fa$mediator], fs$b_path[fs$mediator])
     expect_equal(na$replicates[[1]]$truth$mediation$NIE, 0)
 
-    ri <- gen_mediation(nsample = 50, template = tm, n.mediators = c(comp = 0, other = 2),
+    ri <- gen_mediation(n = 50, template = tm, n.mediators = c(comp = 0, other = 2),
         TIE = 0.5, dir.b = "random", n.interactions = 1, n.mc = 1000, seed = 3)
     expect_true(all(ri$replicates[[1]]$truth$mediation$interaction_pairs$coefficient != 0))
 })
@@ -1476,7 +1476,7 @@ test_that("sim_from_template is reproducible and internal callers keep drawing",
     expect_false(identical(x1, x2))
     raw <- simulate_mimesys_null(tm, n = 20, crosstalk = 0.5, return_type = "simulation")
     expect_length(raw$replicates, 1)
-    cal <- calibrate_crosstalk(tm, crosstalk_grid = c(0, 1), nrep = 3)
+    cal <- calibrate_crosstalk(tm, crosstalk.grid = c(0, 1), nrep = 3)
     d <- cal$raw$rescaled_frobenius[cal$raw$crosstalk == 1 & !cal$raw$diagonal_block]
     expect_gt(stats::sd(d), 0)
 })
@@ -1489,7 +1489,7 @@ test_that("inputs are validated", {
     expect_error(simulate_mimesys(tm, n = 20, nrep = 1.5, crosstalk = 1), "nrep")
     expect_error(fit_template(.mk_template(82), nperm = 0), "nperm")
     expect_error(fit_template(.mk_template(82), var.explained = 0), "var.explained")
-    expect_error(gen_simmba(nsample = 30, template = tm, ygen.mode = "Interaction",
+    expect_error(gen_simmba(n = 30, template = tm, outcome.model = "interaction",
         n.interactions = 1.5, nrep = 1), "n.interactions")
     expect_error(calibrate_crosstalk(tm, p = 1, nrep = 1), "at least two features")
     expect_message(simulate_mimesys_null(tm, n = 20, p = 1), "Skipping crosstalk calibration")
@@ -1504,7 +1504,7 @@ test_that("two-part model is restricted to non-negative data", {
 test_that("TIE = 0 gives a zero target", {
     data(stelzer_mae, package = "MimeSys")
     tm <- fit_template(stelzer_mae, shared.rank = 1)
-    med <- gen_mediation(nsample = 40, template = tm, p = 10, n.mediators = 2,
+    med <- gen_mediation(n = 40, template = tm, p = 10, n.mediators = 2,
         TIE = 0, DE = 0.2, n.mc = 500, nrep = 1)
     expect_identical(med$replicates[[1]]$truth$mediation$TIE_target, 0)
 })
@@ -1518,15 +1518,15 @@ test_that("MAE experiments stored as matrices are transposed", {
         colData = MultiAssayExperiment::colData(stelzer_mae))
     v <- as_mimesys_view_list(mae)
     expect_equal(dim(v[[1]]), rev(dim(mats[[1]])))
-    expect_error(gen_simmba(nsample = 50.5, template = fit_template(mae,
-        shared.rank = 1), nrep = 1), "nsample")
+    expect_error(gen_simmba(n = 50.5, template = fit_template(mae,
+        shared.rank = 1), nrep = 1), "n must")
     expect_error(fit_template(mae, shared.rank.runs = 2.5), "shared.rank.runs")
 })
 
 test_that("a single stage reproduces parallel mediation", {
     data(stelzer_mae, package = "MimeSys")
     tm <- fit_template(stelzer_mae, shared.rank = 2)
-    args <- list(nsample = 50, template = tm, p = 12,
+    args <- list(n = 50, template = tm, p = 12,
         n.mediators = c(CYTOF = 2, Metabolomics = 2, Proteomics = 0), TIE = 0.5, n.mc = 800)
     a <- do.call(gen_mediation, args)$replicates[[1]]
     b <- do.call(gen_mediation, c(args, list(stages = list(c("CYTOF", "Metabolomics")))))$replicates[[1]]
@@ -1539,7 +1539,7 @@ test_that("sequential mediation decomposes the indirect effect by path", {
     data(franzosa_mae, package = "MimeSys")
     tf <- fit_template(franzosa_mae, view.transform = c(Metabolome = "log1p"), shared.rank = 2)
     st <- list(Microbe = "Microbiome", Metab = "Metabolome")
-    m <- gen_mediation(nsample = 6000, template = tf,
+    m <- gen_mediation(n = 6000, template = tf,
         n.mediators = c(Microbiome = 3, Metabolome = 3), stages = st,
         stage.links = list(density = 0.5, strength = 0.3), TIE = 1, DE = 0.5, n.mc = 6000)
     r <- m$replicates[[1]]
@@ -1585,7 +1585,7 @@ test_that("sequential scenarios: shares, pure chain, no links, nulls, patterns",
     data(franzosa_mae, package = "MimeSys")
     tf <- fit_template(franzosa_mae, view.transform = c(Metabolome = "log1p"), shared.rank = 2)
     st <- list("Microbiome", "Metabolome")
-    g <- function(...) gen_mediation(nsample = 60, template = tf,
+    g <- function(...) gen_mediation(n = 60, template = tf,
         n.mediators = c(Microbiome = 3, Metabolome = 3), stages = st, TIE = 0.6,
         n.mc = 1000, ...)$replicates[[1]]
     sh <- g(stage.share = c(1, 3))$truth$mediation
@@ -1603,14 +1603,14 @@ test_that("sequential scenarios: shares, pure chain, no links, nulls, patterns",
         expect_equal(z$path_effects$effect, c(0, 0, 0), tolerance = 1e-10)
     }
     for (sd in 1:5) {
-        hub <- gen_mediation(nsample = 40, template = tf,
+        hub <- gen_mediation(n = 40, template = tf,
             n.mediators = c(Microbiome = 3, Metabolome = 3), stages = st, TIE = 0.6,
             n.mc = 200, seed = sd, stage.links = list(type = "hub", density = 0.34))$replicates[[1]]
         fm <- hub$feature_metadata
         expect_true(all(fm$n_parents[fm$mediator & fm$stage == 2] == 1))
         expect_equal(sum(fm$n_children > 0), 1)
     }
-    expect_error(gen_mediation(nsample = 40, template = tf, n.mediators = 2,
+    expect_error(gen_mediation(n = 40, template = tf, n.mediators = 2,
         stages = c("Microbiome", "Metabolome")), "must be a list")
     expect_silent(g(stage.links = list(direction = "random")))
     cv <- g(stage.links = list(type = "convergent", density = 0.7))
@@ -1623,9 +1623,9 @@ test_that("sequential scenarios: shares, pure chain, no links, nulls, patterns",
     bin <- g(outcome.type = "binary")$truth$mediation$binary
     expect_equal(sum(bin$path_risk_difference), unname(bin$risk_difference["NIE"]),
         tolerance = 1e-10)
-    expect_error(gen_mediation(nsample = 60, template = tf, n.mediators = 2,
+    expect_error(gen_mediation(n = 60, template = tf, n.mediators = 2,
         stages = list("Microbiome")), "not in any stage")
-    expect_error(gen_mediation(nsample = 60, template = tf, n.mediators = 2,
+    expect_error(gen_mediation(n = 60, template = tf, n.mediators = 2,
         stages = list("Microbiome", "Nope")), "unknown view")
     expect_error(g(stage.links = list(strength = 1)), "strength")
 })
@@ -1640,4 +1640,18 @@ test_that("simulate_mediation passes the stage options", {
     expect_equal(nrow(tr$path_effects), 3)
     rd <- SummarizedExperiment::rowData(MultiAssayExperiment::experiments(mae)[["Metabolome"]])
     expect_true(all(c("stage", "n_parents") %in% colnames(rd)))
+})
+
+test_that("shared helpers: weighted logistic intercept and argument checks", {
+    eta1 <- c(-1, 0, 1)
+    eta0 <- c(-2, 2)
+    b <- MimeSys:::.logistic_intercept(c(eta1, eta0), 0.3,
+        weights = c(rep(0.4 / 3, 3), rep(0.6 / 2, 2)))
+    expect_equal(0.4 * mean(plogis(b + eta1)) + 0.6 * mean(plogis(b + eta0)), 0.3,
+        tolerance = 1e-8)
+    expect_equal(mean(plogis(MimeSys:::.logistic_intercept(eta1, 0.2) + eta1)), 0.2,
+        tolerance = 1e-8)
+    expect_error(MimeSys:::.check_prevalence(1, "x"), "strictly between")
+    expect_error(MimeSys:::.check_count(2.5, "k"), "integer")
+    expect_error(MimeSys:::.resolve_template(list(), 1, "template_args"), "named list")
 })

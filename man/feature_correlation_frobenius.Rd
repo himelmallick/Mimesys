@@ -25,7 +25,7 @@ Compute rescaled Frobenius correlation-block distances
 \examples{
 data(stelzer_mae)
 tmpl <- fit_template(stelzer_mae, shared.rank = 2)
-sim <- gen_simmba(nsample = 53, template = tmpl, nrep = 1, seed = 1)
+sim <- gen_simmba(n = 53, template = tmpl, nrep = 1, seed = 1)
 simulated <- simulation_view_matrices(sim, feature_names =
 "template_feature")
 feature_correlation_frobenius(tmpl$observed, simulated)

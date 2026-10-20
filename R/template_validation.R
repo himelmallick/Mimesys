@@ -91,17 +91,17 @@ validate_mimesys_input <- function(x, assay = NULL, min_common_samples = 10) {
 #' @param template A fitted `mimesys_template` or input accepted by
 #'   [fit_template()].
 #' @param p Feature counts for validation simulation. See [sim_from_template()].
-#' @param nsample Number of samples per null validation replicate. Defaults to
+#' @param n Number of samples per null validation replicate. Defaults to
 #'   the template sample size.
 #' @param nrep Number of null replicates used in calibration.
-#' @param crosstalk_grid Candidate crosstalk values.
-#' @param max_features_per_view Optional cap for detailed correlation and
+#' @param crosstalk.grid Candidate crosstalk values.
+#' @param max.features.per.view Optional cap for detailed correlation and
 #'   marginal diagnostics: the most variable observed features of each view are
 #'   kept, and the same features are used for the simulated data. This does
 #'   not alter the calibration, which uses all matched features by default.
 #' @param view.models Optional named vector of per-view observation models
 #'   passed to [sim_from_template()].
-#' @param template_args Named list passed to [fit_template()] for raw input.
+#' @param template.args Named list passed to [fit_template()] for raw input.
 #' @param seed Random seed.
 #'
 #' @return An object of class `mimesys_template_validation`. Its
@@ -113,39 +113,35 @@ validate_mimesys_input <- function(x, assay = NULL, min_common_samples = 10) {
 #' data(stelzer_mae)
 #' tmpl <- fit_template(stelzer_mae, shared.rank = 2)
 #' report <- validate_template(
-#'     tmpl, nrep = 1, crosstalk_grid = c(0, 0.5, 1),
-#'     max_features_per_view = 20
+#'     tmpl, nrep = 1, crosstalk.grid = c(0, 0.5, 1),
+#'     max.features.per.view = 20
 #' )
 #' report
 #' report$marginal_diagnostics
 #' @export
 validate_template <- function(template,
     p = NULL,
-    nsample = NULL,
+    n = NULL,
     nrep = 5,
-    crosstalk_grid = seq(0, 1, by = 0.25),
-    max_features_per_view = 100,
+    crosstalk.grid = seq(0, 1, by = 0.25),
+    max.features.per.view = 100,
     view.models = NULL,
-    template_args = list(),
+    template.args = list(),
     seed = 1234) {
     if (!is.null(seed)) withr::local_seed(seed)
-    if (!is.list(template_args)) stop("template_args must be a named list.",
-        call. = FALSE)
-    tmpl <- if (inherits(template, "mimesys_template")) template else {
-        do.call(fit_template, c(list(template = template), template_args))
-    }
+    tmpl <- .resolve_template(template, template.args, "template.args")
     if (is.null(tmpl$observed)) {
         stop("Template must retain observed matrices; refit with fit_template().",
             call. = FALSE)
     }
-    if (is.null(nsample)) nsample <- tmpl$n0
+    if (is.null(n)) n <- tmpl$n0
 
     calibrate <- length(tmpl$views) >= 2L && !identical(as.integer(tmpl$shared.rank), 0L)
     if (calibrate) {
         calibration <- calibrate_crosstalk(
             tmpl,
-            crosstalk_grid = crosstalk_grid,
-            nsample = nsample,
+            crosstalk.grid = crosstalk.grid,
+            n = n,
             nrep = nrep,
             p = p,
             view.models = view.models,
@@ -161,7 +157,7 @@ validate_template <- function(template,
     }
     if (!is.null(seed)) withr::local_seed(seed + 1L)
     pcl <- .sim_from_template_impl(
-        tmpl, n = nsample, p = p, crosstalk = selected,
+        tmpl, n = n, p = p, crosstalk = selected,
         view.models = view.models
     )
     simulated <- .mimesys_pcl_view_matrices(pcl,
@@ -171,7 +167,7 @@ validate_template <- function(template,
     ## features in the simulated data, so the two correlation structures are
     ## compared feature for feature.
     aligned <- .mimesys_align_observed_simulated(observed, simulated,
-        max_features_per_view = max_features_per_view)
+        max_features_per_view = max.features.per.view)
     obs_corr <- blockwise_feature_correlation(aligned$observed)
     sim_corr <- blockwise_feature_correlation(aligned$simulated)
 
@@ -184,11 +180,11 @@ validate_template <- function(template,
         correlation_structure = compare_feature_correlation_structure(obs_corr,
             sim_corr),
         marginal_diagnostics = .mimesys_marginal_diagnostics(
-            observed, simulated, max_features_per_view = max_features_per_view
+            observed, simulated, max_features_per_view = max.features.per.view
         ),
         settings = list(
-            p = p, nsample = nsample, nrep = nrep,
-            max_features_per_view = max_features_per_view, view.models = view.models, seed = seed,
+            p = p, n = n, nrep = nrep,
+            max.features.per.view = max.features.per.view, view.models = view.models, seed = seed,
             package_version = as.character(utils::packageVersion("MimeSys")),
             created_at = format(Sys.time(), tz = "UTC", usetz = TRUE)
         )
@@ -227,8 +223,8 @@ print.mimesys_template_validation <- function(x, ...) {
 #' data(stelzer_mae)
 #' tmpl <- fit_template(stelzer_mae, shared.rank = 2)
 #' report <- validate_template(
-#'     tmpl, nrep = 1, crosstalk_grid = c(0, 0.5, 1),
-#'     max_features_per_view = 20
+#'     tmpl, nrep = 1, crosstalk.grid = c(0, 0.5, 1),
+#'     max.features.per.view = 20
 #' )
 #' if (requireNamespace("ggplot2", quietly = TRUE)) {
 #'     plot_template_validation(report, type = "marginal")

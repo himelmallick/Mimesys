@@ -32,7 +32,7 @@ correlation matrix, not only its average magnitude.
 \examples{
 data(stelzer_mae)
 tmpl <- fit_template(stelzer_mae, shared.rank = 2)
-sim <- gen_simmba(nsample = 53, template = tmpl, nrep = 1, seed = 1)
+sim <- gen_simmba(n = 53, template = tmpl, nrep = 1, seed = 1)
 obs <- blockwise_feature_correlation(tmpl$observed)
 simulated <- blockwise_feature_correlation(
     simulation_view_matrices(sim, feature_names = "template_feature")

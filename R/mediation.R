@@ -101,7 +101,7 @@
 #' calibrated as in the corresponding spiked scenario, so type I error and
 #' power runs are matched on effect sizes.
 #'
-#' @param nsample Number of samples per replicate.
+#' @param n Number of samples per replicate.
 #' @param template A fitted `mimesys_template` or input accepted by
 #'   [fit_template()].
 #' @param p Feature counts per view; see [sim_from_template()].
@@ -205,7 +205,7 @@
 #' data(stelzer_mae)
 #' tmpl <- fit_template(stelzer_mae, shared.rank = 2, seed = 1)
 #' med <- gen_mediation(
-#'     nsample = 200, template = tmpl, p = 20,
+#'     n = 200, template = tmpl, p = 20,
 #'     n.mediators = c(CYTOF = 2, Metabolomics = 2, Proteomics = 0),
 #'     TIE = 0.5, DE = 0.2, n.mc = 2000, seed = 1
 #' )
@@ -217,7 +217,7 @@
 #'
 #' ## Sequential mediation: exposure -> CyTOF -> metabolome -> outcome
 #' seq_med <- gen_mediation(
-#'     nsample = 200, template = tmpl, p = 20,
+#'     n = 200, template = tmpl, p = 20,
 #'     n.mediators = c(CYTOF = 3, Metabolomics = 3, Proteomics = 0),
 #'     stages = list(Immune = "CYTOF", Metabolic = "Metabolomics"),
 #'     stage.links = list(type = "random", density = 0.5, strength = 0.3),
@@ -226,7 +226,7 @@
 #' seq_med$replicates[[1]]$truth$mediation$path_effects
 #' seq_med$replicates[[1]]$truth$mediation$links
 #' @export
-gen_mediation <- function(nsample,
+gen_mediation <- function(n,
     template,
     p = NULL,
     crosstalk = 1,
@@ -261,15 +261,12 @@ gen_mediation <- function(nsample,
     exposure.type <- match.arg(exposure.type)
     outcome.type <- match.arg(outcome.type)
     if (identical(outcome.type, "binary")) {
-        .check_unit_interval(outcome.prevalence, "outcome.prevalence", single = TRUE)
-        if (outcome.prevalence <= 0 || outcome.prevalence >= 1) {
-            stop("outcome.prevalence must be strictly between 0 and 1.", call. = FALSE)
-        }
+        .check_prevalence(outcome.prevalence, "outcome.prevalence")
     }
     feature.select <- match.arg(feature.select)
-    .check_positive_integer(nsample, "nsample", min = 4)
-    .check_positive_integer(nrep, "nrep")
-    .check_positive_integer(n.mc, "n.mc", min = 100)
+    .check_count(n, "n", min = 4L)
+    .check_count(nrep, "nrep", min = 1L)
+    .check_count(n.mc, "n.mc", min = 100L)
     if (!is.numeric(TIE) || length(TIE) != 1L || !is.finite(TIE) || TIE < 0) {
         stop("TIE must be a single non-negative number; its sign comes from dir.a and dir.b.",
             call. = FALSE)
@@ -282,20 +279,13 @@ gen_mediation <- function(nsample,
     }
     .check_unit_interval(min.variability, "min.variability", single = TRUE)
     if (identical(exposure.type, "binary")) {
-        .check_unit_interval(exposure.prevalence, "exposure.prevalence", single = TRUE)
-        if (exposure.prevalence <= 0 || exposure.prevalence >= 1) {
-            stop("exposure.prevalence must be strictly between 0 and 1.", call. = FALSE)
-        }
+        .check_prevalence(exposure.prevalence, "exposure.prevalence")
     }
-    if (!is.numeric(n.interactions) || length(n.interactions) != 1L ||
-        !is.finite(n.interactions) || n.interactions < 0 ||
-        abs(n.interactions - round(n.interactions)) > 1e-8) {
-        stop("n.interactions must be a single non-negative integer.", call. = FALSE)
-    }
+    .check_count(n.interactions, "n.interactions", min = 0L)
     .check_direction(dir.a, "dir.a")
     .check_direction(dir.b, "dir.b")
 
-    tmpl <- if (inherits(template, "mimesys_template")) template else fit_template(template, ...)
+    tmpl <- .resolve_template(template, list(...))
     views <- tmpl$views
     n_med <- .per_view_values(n.mediators, views, "n.mediators")
     if (!is.numeric(n_med) || any(!is.finite(n_med)) || any(n_med < 0) ||
@@ -590,19 +580,15 @@ gen_mediation <- function(nsample,
             m0 <- x0$med
             ## Intercept so that the population outcome prevalence is as
             ## requested (exposure drawn from its distribution)
-            if (identical(exposure.type, "binary")) {
+            intercept <- if (identical(exposure.type, "binary")) {
                 eta1 <- lin(m1, contrast[["t1"]])
                 eta0 <- lin(m0, contrast[["t0"]])
-                f <- function(b0) {
-                    exposure.prevalence * mean(stats::plogis(b0 + eta1)) +
-                        (1 - exposure.prevalence) * mean(stats::plogis(b0 + eta0)) -
-                        outcome.prevalence
-                }
+                .logistic_intercept(c(eta1, eta0), outcome.prevalence,
+                    weights = c(rep(exposure.prevalence / length(eta1), length(eta1)),
+                        rep((1 - exposure.prevalence) / length(eta0), length(eta0))))
             } else {
-                eta_pop <- lin(m_pop, t_pop)
-                f <- function(b0) mean(stats::plogis(b0 + eta_pop)) - outcome.prevalence
+                .logistic_intercept(lin(m_pop, t_pop), outcome.prevalence)
             }
-            intercept <- stats::uniroot(f, c(-50, 50), tol = 1e-10)$root
             ## Counterfactual (natural) effects: p(t, M(t'))
             p_cfg <- vapply(draws, function(d) {
                 mean(stats::plogis(intercept + lin(d$med, contrast[["t1"]])))
@@ -627,12 +613,12 @@ gen_mediation <- function(nsample,
 
         ## 3. Observed data
         exposure <- if (identical(exposure.type, "binary")) {
-            stats::rbinom(nsample, 1L, exposure.prevalence)
+            stats::rbinom(n, 1L, exposure.prevalence)
         } else {
-            stats::rnorm(nsample)
+            stats::rnorm(n)
         }
         t_star <- (exposure - mu_t) / sd_t
-        pcl <- .sim_from_template_impl(tmpl, n = nsample, p = p, crosstalk = crosstalk,
+        pcl <- .sim_from_template_impl(tmpl, n = n, p = p, crosstalk = crosstalk,
             view.models = view.models,
             back.transform = if (isTRUE(back.transform)) "both" else FALSE,
             .structure = structure,
@@ -641,9 +627,9 @@ gen_mediation <- function(nsample,
         mt <- .standardize_features(pcl, std)[, rows, drop = FALSE]
         eta <- lin(mt, exposure)
         y <- if (identical(outcome.type, "binary")) {
-            stats::rbinom(nsample, 1L, stats::plogis(intercept + eta))
+            stats::rbinom(n, 1L, stats::plogis(intercept + eta))
         } else {
-            eta + sigma * stats::rnorm(nsample)
+            eta + sigma * stats::rnorm(n)
         }
         if (!is.null(pcl$original_table)) {
             pcl$feature_table <- pcl$original_table
@@ -761,7 +747,7 @@ gen_mediation <- function(nsample,
         template = if (isTRUE(return.template)) tmpl else NULL,
         template_provenance = tmpl$provenance,
         settings = list(
-            nsample = nsample, p = p, crosstalk = crosstalk,
+            n = n, p = p, crosstalk = crosstalk,
             n.mediators = n_med, TIE = TIE, DE = DE, dir.a = dir.a, dir.b = dir.b,
             effect.type = effect.type, exposure.type = exposure.type,
             exposure.prevalence = if (identical(exposure.type, "binary")) exposure.prevalence else NULL,
@@ -778,14 +764,6 @@ gen_mediation <- function(nsample,
 }
 
 ## ---- mediation helpers --------------------------------------------------
-
-.check_positive_integer <- function(x, name, min = 1) {
-    if (!is.numeric(x) || length(x) != 1L || !is.finite(x) || x < min ||
-        abs(x - round(x)) > 1e-8) {
-        stop(name, " must be a single integer of at least ", min, ".", call. = FALSE)
-    }
-    invisible(x)
-}
 
 .check_direction <- function(x, name) {
     ok <- length(x) == 1L && (identical(x, "random") ||
@@ -900,7 +878,6 @@ simulate_mediation <- function(template,
     seed = 1234,
     return_type = c("mae", "simulation")) {
     return_type <- match.arg(return_type)
-    .check_positive_integer(n, "n", min = 4)
     if (!is.null(seed)) withr::local_seed(seed)
     mediation_defaults <- list(
         n_mediators = 5, tie = 1, de = 0, dir_a = 1, dir_b = 1,
@@ -911,23 +888,15 @@ simulate_mediation <- function(template,
         stages = NULL, stage_links = list(), stage_direct = 1, stage_share = NULL
     )
     mediation <- .mimesys_merge_options(mediation, mediation_defaults, "mediation")
-    null_defaults <- list(
-        feature_select = "random", feature_jitter = 0.2,
-        view_models = NULL, back_transform = FALSE
-    )
-    null_model <- .mimesys_merge_options(null_model, null_defaults, "null_model")
-    if (!is.list(template_args)) stop("template_args must be a named list.", call. = FALSE)
-    tmpl <- if (inherits(template, "mimesys_template")) {
-        template
-    } else {
-        do.call(fit_template, c(list(template = template), template_args))
-    }
-    resolved <- .mimesys_resolve_crosstalk(
-        tmpl, n = as.integer(n), p = p, crosstalk = crosstalk,
-        calibration = calibration, null_model = null_model, seed = seed
-    )
+    setup <- .mimesys_wrapper_setup(template, n = n, p = p, nrep = nrep,
+        crosstalk = crosstalk, null_model = null_model,
+        template_args = template_args, calibration = calibration, seed = seed,
+        min_n = 4L)
+    tmpl <- setup$template
+    null_model <- setup$null_model
+    resolved <- setup$crosstalk
     sim <- gen_mediation(
-        nsample = n, template = tmpl, p = p, crosstalk = resolved$value,
+        n = n, template = tmpl, p = p, crosstalk = resolved$value,
         n.mediators = mediation$n_mediators, TIE = mediation$tie, DE = mediation$de,
         dir.a = mediation$dir_a, dir.b = mediation$dir_b,
         effect.type = mediation$effect_type, exposure.type = mediation$exposure_type,
@@ -952,16 +921,9 @@ simulate_mediation <- function(template,
     settings$purpose <- "mediation"
     settings$seed <- seed
     settings$crosstalk_calibration <- resolved$calibration
-    settings$provenance <- list(
-        package_version = as.character(utils::packageVersion("MimeSys")),
-        created_at = format(Sys.time(), tz = "UTC", usetz = TRUE),
-        selected_crosstalk = resolved$value,
-        template = tmpl$provenance
-    )
+    settings$provenance <- .mimesys_wrapper_provenance(tmpl, resolved)
     maes <- lapply(sim$replicates, function(rep_k) {
         .mimesys_replicate_to_mae(rep_k, simulation = settings, split = "all")
     })
-    if (length(maes) == 1L) return(maes[[1]])
-    structure(list(replicates = unname(maes), settings = settings),
-        class = "mimesys_mae_simulation")
+    .mimesys_collect_maes(maes, settings)
 }
