@@ -1,5 +1,25 @@
 # MimeSys 0.99.0
 
+## Multi-study simulation (new)
+
+* `gen_multistudy()` simulates several studies from one template, with
+  case-mix shifts of the latent factors (`shift.sd`), technical batch effects
+  on the latent scale (`batch.loc.sd`, `batch.scale.sd`), study-specific
+  signal features (`support.overlap`) and effect sizes (`effect.cor`), and
+  study intercepts and SNRs (`intercept.sd`, `snr.sd`). Studies can be held
+  out for testing (`holdout.studies`). The predictor is standardized on the
+  pooled samples so study differences are kept; binary prevalence is
+  calibrated on the pooled sample and survival censoring within each study.
+  The full study-level truth is returned. Heterogeneity is drawn from a
+  separate random stream, so the base data stay the same across
+  heterogeneity levels for a given seed.
+* `simulate_multistudy()` is the MAE-first wrapper, with the presets and
+  options of `simulate_mimesys()` plus a `heterogeneity` list.
+* Internal: `gen_simmba()` now runs on the same outcome engine with one study;
+  its results are unchanged (verified bit-for-bit). `sim_from_template()`'s
+  internal mapping can map a second set of latent scores (used for batch
+  effects).
+
 ## Argument names made consistent (breaking)
 
 * The core functions now use one name for one concept, in `dot.case`:

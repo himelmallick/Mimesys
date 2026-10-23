@@ -459,7 +459,8 @@ sim_from_template <- function(template, n, p = NULL, crosstalk = 1,
     view.models = NULL,
     back.transform = FALSE,
     .structure = NULL,
-    .latent_hook = NULL) {
+    .latent_hook = NULL,
+    .observed_hook = NULL) {
 
     ## .structure (internal): reuse the parent features and loadings from an
     ## earlier call (attr(x, "structure")), so counterfactual simulations share
@@ -591,69 +592,93 @@ sim_from_template <- function(template, n, p = NULL, crosstalk = 1,
             picks_orig[[m]] <- sample.int(p[m], n, replace = TRUE)
         }
     }
-    if (is.function(.latent_hook)) Z_list <- .latent_hook(Z_list)
+    ## Context for the latent hooks: loadings, cross-view coupling and the
+    ## latent scores drawn above.
+    hook_context <- list(lam = lam_list, B = tmpl$B, gamma = gamma, ks = ks,
+        r = r, p = p, views = views)
+    .call_hook <- function(hook, Z) {
+        if (length(formals(hook)) >= 2L) hook(Z, hook_context) else hook(Z)
+    }
+    if (is.function(.latent_hook)) Z_list <- .call_hook(.latent_hook, Z_list)
+    ## .observed_hook (internal): a second set of latent scores (e.g. with
+    ## batch effects) mapped through the same marginals. The base scores still
+    ## give feature_table; the second set gives observed_table.
+    Z_observed <- if (is.function(.observed_hook)) .call_hook(.observed_hook, Z_list) else NULL
 
+    ## Map latent scores to the data scale. No random numbers are drawn here,
+    ## so the mapping can be applied to more than one set of latent scores.
+    .map_views <- function(Z_all) {
+        X_out <- Xorig_out <- scale_out <- vector("list", M)
+        for (m in seq_len(M)) {
+            fit <- tmpl$fits[[m]]
+            parent <- parent_list[[m]]
+
+            U <- NULL
+            ## Map the normal scores through each parent's empirical quantiles
+            Z <- Z_all[[m]]
+            if (identical(view.models[[m]], "two_part_copula")) {
+                ## A little extra noise decouples abundance from presence;
+                ## rescaling keeps unit variance so pnorm() stays uniform.
+                Z_abundance <- (Z + abundance_noise[[m]]) / sqrt(1 + 0.15^2)
+                Xm <- .simulate_two_part_view(
+                    fit = fit,
+                    parent = parent,
+                    U_presence = stats::pnorm(Z),
+                    U_abundance = stats::pnorm(Z_abundance)
+                )
+            } else {
+                U <- stats::pnorm(Z)
+                Xm <- .emp_quantile_matrix(fit$qmat, parent, U, fit$discrete)
+            }
+
+            transformed <- !is.null(tmpl$view.transform) &&
+                !identical(tmpl$view.transform[[views[m]]], "none")
+            if (!transformed) {
+                ## Fitted scale is the original scale: enforce the composition
+                ## constraint (no sample above the template total)
+                Xm <- .apply_composition(Xm, fit$composition, p[m], p0[m],
+                    pick = picks_fitted[[m]])
+            }
+            view_scale <- "fitted"
+            if (isTRUE(back.transform) || identical(back.transform, "both")) {
+                Xo <- .mimesys_original_scale_view(fit, parent, Xm, U,
+                    info = tmpl$transform.info[[views[m]]],
+                    two_part = identical(view.models[[m]], "two_part_copula"),
+                    full_features = p[m] >= p0[m], view = views[m])
+                if (transformed) {
+                    Xo <- .apply_composition(Xo, fit$composition, p[m], p0[m],
+                        pick = picks_orig[[m]])
+                }
+                if (identical(back.transform, "both")) {
+                    dimnames(Xo) <- list(sample_ids, paste0(views[m], "_",
+                        seq_len(p[m])))
+                    Xorig_out[[m]] <- Xo
+                } else {
+                    Xm <- Xo
+                    view_scale <- "original"
+                }
+            }
+            ids <- paste0(views[m], "_", seq_len(p[m]))
+            dimnames(Xm) <- list(sample_ids, ids)
+            X_out[[m]] <- Xm
+            scale_out[[m]] <- view_scale
+        }
+        list(X = X_out, Xorig = Xorig_out, scale = scale_out)
+    }
+    mapped <- .map_views(Z_list)
+    X_list <- mapped$X
+    Xorig_list <- mapped$Xorig
     for (m in seq_len(M)) {
         fit <- tmpl$fits[[m]]
-        parent <- parent_list[[m]]
-        Lam <- lam_list[[m]]
-        offspring <- offspring_list[[m]]
-
-        U <- NULL
-        ## Map the normal scores through each parent's empirical quantiles
-        Z <- Z_list[[m]]
-        if (identical(view.models[[m]], "two_part_copula")) {
-            ## A little extra noise decouples abundance from presence;
-            ## rescaling keeps unit variance so pnorm() stays uniform.
-            Z_abundance <- (Z + abundance_noise[[m]]) / sqrt(1 + 0.15^2)
-            Xm <- .simulate_two_part_view(
-                fit = fit,
-                parent = parent,
-                U_presence = stats::pnorm(Z),
-                U_abundance = stats::pnorm(Z_abundance)
-            )
-        } else {
-            U <- stats::pnorm(Z)
-            Xm <- .emp_quantile_matrix(fit$qmat, parent, U, fit$discrete)
-        }
-
-        transformed <- !is.null(tmpl$view.transform) &&
-            !identical(tmpl$view.transform[[views[m]]], "none")
-        if (!transformed) {
-            ## Fitted scale is the original scale: enforce the composition
-            ## constraint (no sample above the template total)
-            Xm <- .apply_composition(Xm, fit$composition, p[m], p0[m],
-                pick = picks_fitted[[m]])
-        }
-        view_scale <- "fitted"
-        if (isTRUE(back.transform) || identical(back.transform, "both")) {
-            Xo <- .mimesys_original_scale_view(fit, parent, Xm, U,
-                info = tmpl$transform.info[[views[m]]],
-                two_part = identical(view.models[[m]], "two_part_copula"),
-                full_features = p[m] >= p0[m], view = views[m])
-            if (transformed) {
-                Xo <- .apply_composition(Xo, fit$composition, p[m], p0[m],
-                    pick = picks_orig[[m]])
-            }
-            if (identical(back.transform, "both")) {
-                dimnames(Xo) <- list(sample_ids, paste0(views[m], "_",
-                    seq_len(p[m])))
-                Xorig_list[[m]] <- Xo
-            } else {
-                Xm <- Xo
-                view_scale <- "original"
-            }
-        }
         ids <- paste0(views[m], "_", seq_len(p[m]))
-        dimnames(Xm) <- list(sample_ids, ids)
-        X_list[[m]] <- Xm
         meta_list[[m]] <- data.frame(
             featureID = ids, featureType = views[m],
-            template_feature = colnames(fit$qmat)[parent], offspring = offspring,
+            template_feature = colnames(fit$qmat)[parent_list[[m]]],
+            offspring = offspring_list[[m]],
             view_model = view.models[[m]],
-            scale = view_scale,
+            scale = mapped$scale[[m]],
             transform = if (is.null(tmpl$view.transform)) "none" else tmpl$view.transform[[views[m]]],
-            shared_loading = if (r > 0) as.numeric(Lam %*% tmpl$B[[m]][,
+            shared_loading = if (r > 0) as.numeric(lam_list[[m]] %*% tmpl$B[[m]][,
                 1]) else 0,
             stringsAsFactors = FALSE
         )
@@ -672,6 +697,14 @@ sim_from_template <- function(template, n, p = NULL, crosstalk = 1,
             view.models = stats::setNames(view.models, views)))
     if (identical(back.transform, "both")) {
         out$original_table <- as.data.frame(t(do.call(cbind, Xorig_list)))
+    }
+    if (!is.null(Z_observed)) {
+        observed <- .map_views(Z_observed)
+        out$observed_table <- as.data.frame(t(do.call(cbind, observed$X)))
+        if (identical(back.transform, "both")) {
+            out$observed_original_table <- as.data.frame(t(do.call(cbind,
+                observed$Xorig)))
+        }
     }
     attr(out, "structure") <- list(parent = parent_list, lam = lam_list,
         offspring = offspring_list)

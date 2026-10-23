@@ -419,7 +419,18 @@ med_mae &lt;- simulate_mediation(
   mediation = list(n_mediators = c(CYTOF = 3, Metabolomics = 3, Proteomics = 0),
                    tie = 1, de = 0.5)
 )
-metadata(med_mae)$truth$mediation[c(&quot;NIE&quot;, &quot;NDE&quot;, &quot;TE&quot;)]</code></pre>
+metadata(med_mae)$truth$mediation[c(&quot;NIE&quot;, &quot;NDE&quot;, &quot;TE&quot;)]
+
+# 5. Several studies with between-study heterogeneity (see &quot;Multi-study
+#    simulation&quot; below); study 3 is held out for testing
+ms_mae &lt;- simulate_multistudy(
+  template, n = c(150, 200, 100), p = 30,
+  heterogeneity = list(effect_cor = 0.5, support_overlap = 0.7,
+                       shift_sd = 0.3, batch_loc_sd = 0.3,
+                       holdout_studies = 3)
+)
+table(colData(ms_mae)$study, colData(ms_mae)$split)
+metadata(ms_mae)$truth$studies         # study sizes, intercepts, SNRs</code></pre>
 <p>Every function that uses random numbers has <code>seed = 1234</code>
 by default and leaves your own random-number state unchanged; use
 <code>seed = NULL</code> to draw from the current stream.</p>
@@ -457,42 +468,48 @@ cross-view space</td>
 <td>Null data plus planted outcome signal and a train/test split</td>
 </tr>
 <tr class="odd">
+<td><code>gen_multistudy()</code></td>
+<td>Several studies with case-mix, batch, coefficient, intercept and SNR
+heterogeneity</td>
+</tr>
+<tr class="even">
 <td><code>gen_mediation()</code></td>
 <td>Exposure, mediators and outcome with exact natural (path-specific)
 effects</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>calibrate_crosstalk()</code></td>
 <td>Chooses crosstalk so simulated cross-view correlations match the
 template</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>validate_template()</code></td>
 <td>Calibration plus correlation and marginal diagnostics</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>crosstalk_max()</code></td>
 <td>Largest valid crosstalk per view</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>simulate_mimesys()</code>,
 <code>simulate_mimesys_null()</code>,
+<code>simulate_multistudy()</code>,
 <code>simulate_mediation()</code></td>
 <td>MAE-first wrappers: fit if needed, calibrate crosstalk, simulate,
 return <code>MultiAssayExperiment</code> objects</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>mimesys_presets()</code></td>
 <td>Outcome presets for <code>simulate_mimesys()</code></td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>as_mimesys_mae()</code>,
 <code>simulation_view_matrices()</code>,
 <code>as_mimesys_view_list()</code></td>
 <td>Conversions between simulation results, MAEs and lists of
 matrices</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>blockwise_feature_correlation()</code>,
 <code>feature_correlation_frobenius()</code>,
 <code>compare_feature_correlation_structure()</code>,
@@ -805,6 +822,85 @@ raw data.</td>
 </tbody>
 </table>
 </div>
+<div id="gen_multistudy" class="section level3">
+<h3><code>gen_multistudy()</code></h3>
+<p>Takes every <code>gen_simmba()</code> argument (with the same
+defaults) and returns the same format, with all studies of a replicate
+pooled. In addition:</p>
+<table>
+<colgroup>
+<col width="33%" />
+<col width="33%" />
+<col width="33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Argument</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>n</code></td>
+<td>required</td>
+<td>Samples per study: one value (with <code>nstudy</code>) or one per
+study.</td>
+</tr>
+<tr class="even">
+<td><code>nstudy</code></td>
+<td><code>length(n)</code></td>
+<td>Number of studies.</td>
+</tr>
+<tr class="odd">
+<td><code>effect.cor</code></td>
+<td><code>1</code></td>
+<td>Correlation of the common signal features’ effect sizes between
+studies.</td>
+</tr>
+<tr class="even">
+<td><code>support.overlap</code></td>
+<td><code>1</code></td>
+<td>Fraction of each study’s signal features taken from the common set
+(the rest are study-specific).</td>
+</tr>
+<tr class="odd">
+<td><code>intercept.sd</code></td>
+<td><code>0</code></td>
+<td>SD of study intercepts (continuous: in signal-SD units; binary:
+logit scale; survival: log hazard).</td>
+</tr>
+<tr class="even">
+<td><code>snr.sd</code></td>
+<td><code>0</code></td>
+<td>SD of the study log-SNRs.</td>
+</tr>
+<tr class="odd">
+<td><code>shift.sd</code></td>
+<td><code>0</code></td>
+<td>Case mix: SD of study mean shifts of the latent factor scores
+(biological; enters the outcome).</td>
+</tr>
+<tr class="even">
+<td><code>batch.loc.sd</code>, <code>batch.scale.sd</code></td>
+<td><code>0</code></td>
+<td>Technical batch effects per study and feature, on the latent scale
+(added after the outcome).</td>
+</tr>
+<tr class="odd">
+<td><code>holdout.studies</code></td>
+<td><code>NULL</code></td>
+<td>Studies whose samples all go to the test split.</td>
+</tr>
+<tr class="even">
+<td><code>train.fraction</code></td>
+<td><code>0.7</code></td>
+<td>Training share within each non-holdout study (<code>1</code> allowed
+with holdout studies).</td>
+</tr>
+</tbody>
+</table>
+</div>
 <div id="calibrate_crosstalk-and-validate_template" class="section level3">
 <h3><code>calibrate_crosstalk()</code> and
 <code>validate_template()</code></h3>
@@ -990,8 +1086,11 @@ mediators.</td>
 <code>simulate_mimesys_null()</code> takes the same arguments without
 <code>preset</code>, <code>outcome</code>, <code>signal</code> and
 <code>train_fraction</code>; <code>simulate_mediation()</code> replaces
-them with <code>mediation</code>. The option lists use
-<code>snake_case</code> and map to the arguments above:</p>
+them with <code>mediation</code>. <code>simulate_multistudy()</code>
+takes the <code>simulate_mimesys()</code> arguments plus
+<code>nstudy</code> and <code>heterogeneity</code>; <code>n</code> is
+the size of each study. The option lists use <code>snake_case</code> and
+map to the arguments above:</p>
 <table>
 <colgroup>
 <col width="33%" />
@@ -1058,6 +1157,14 @@ them with <code>mediation</code>. The option lists use
 <td><code>gen_mediation()</code></td>
 </tr>
 <tr class="even">
+<td><code>heterogeneity</code></td>
+<td><code>effect_cor</code> (1), <code>support_overlap</code> (1),
+<code>intercept_sd</code> (0), <code>snr_sd</code> (0),
+<code>shift_sd</code> (0), <code>batch_loc_sd</code> (0),
+<code>batch_scale_sd</code> (0), <code>holdout_studies</code></td>
+<td><code>gen_multistudy()</code></td>
+</tr>
+<tr class="odd">
 <td><code>template_args</code></td>
 <td></td>
 <td><code>fit_template()</code>, when <code>template</code> is raw
@@ -1242,6 +1349,104 @@ that drive the outcome in <code>outcome_feature</code>, the predictor
 and its parts in <code>colData()</code> (<code>Xbeta</code>,
 <code>Xbeta_linear</code>, …), and the interaction pairs in
 <code>metadata(x)$truth$interaction_pairs</code>.</p>
+</div>
+<div id="multi-study-simulation" class="section level2">
+<h2>Multi-study simulation</h2>
+<p><code>gen_multistudy()</code> simulates <span class="math inline">\(S\)</span> studies from one template. Every study
+measures the same simulated features (study 1 chooses them). Study <span class="math inline">\(s\)</span> differs from the others in five
+ways:</p>
+<table>
+<colgroup>
+<col width="33%" />
+<col width="33%" />
+<col width="33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Heterogeneity</th>
+<th>Model</th>
+<th>Argument</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Case mix</td>
+<td>Shared factors <span class="math inline">\(F_i +
+\delta^{sh}_s\)</span> and view-specific innovations <span class="math inline">\(E_i + \delta^{E}_s\)</span>, <span class="math inline">\(\delta \sim N(0, \sigma_{shift}^2 I)\)</span>;
+features follow through the loadings</td>
+<td><code>shift.sd</code></td>
+</tr>
+<tr class="even">
+<td>Batch</td>
+<td>Latent feature score <span class="math inline">\(z_{ij} \to a_{sj} +
+b_{sj} z_{ij}\)</span>, <span class="math inline">\(a_{sj} \sim N(0,
+\sigma_a^2)\)</span>, <span class="math inline">\(\log b_{sj} \sim N(0,
+\sigma_b^2)\)</span>, then the template marginals</td>
+<td><code>batch.loc.sd</code>, <code>batch.scale.sd</code></td>
+</tr>
+<tr class="odd">
+<td>Signal features</td>
+<td>A fraction <span class="math inline">\(\omega\)</span> of each
+study’s signal features come from the common set; the rest are drawn
+from the other features of that view (following
+<code>signal.align</code>)</td>
+<td><code>support.overlap</code></td>
+</tr>
+<tr class="even">
+<td>Effect sizes</td>
+<td><span class="math inline">\(\beta_{sj} = \mu + \sqrt{\rho}\,
+(\beta_j - \mu) + \sqrt{1 - \rho}\, (\beta^{*}_{sj} - \mu)\)</span>,
+with <span class="math inline">\(\beta^{*}_{sj}\)</span> an independent
+draw from the effect-size distribution and <span class="math inline">\(\mu\)</span> the mean of that distribution, so the
+mean and variance are kept and <span class="math inline">\(\mathrm{cor}(\beta_{sj}, \beta_{tj}) =
+\rho\)</span></td>
+<td><code>effect.cor</code></td>
+</tr>
+<tr class="odd">
+<td>Baseline and noise</td>
+<td>Study intercept <span class="math inline">\(\alpha_s \sim N(0,
+\sigma_\alpha^2)\)</span> and <span class="math inline">\(\mathrm{SNR}_s
+= \mathrm{SNR}\, e^{\epsilon_s}\)</span>, <span class="math inline">\(\epsilon_s \sim N(0, \sigma_{snr}^2)\)</span></td>
+<td><code>intercept.sd</code>, <code>snr.sd</code></td>
+</tr>
+</tbody>
+</table>
+<p>The predictor is built on the pooled samples, so study differences
+are kept. Features are standardized over all studies before batch
+effects (with <code>signal.share</code>, each view is rescaled by one
+factor for all studies), and <span class="math inline">\(\eta_i = \tilde
+x_i^\top \beta_{s(i)}\)</span> (plus the Friedman, interaction or
+shared-latent part, which is the same in every study). With <span class="math inline">\(V\)</span> the pooled within-study variance of
+<span class="math inline">\(\eta\)</span>:</p>
+<ul>
+<li>continuous: <span class="math inline">\(Y_i = \eta_i +
+\alpha_{s}\sqrt{V} + \varepsilon_i\)</span>, <span class="math inline">\(\varepsilon_i \sim N(0, V /
+\mathrm{SNR}_s)\)</span>;</li>
+<li>binary: <span class="math inline">\(\mathrm{logit}\, P(Y_i = 1) = c
++ \alpha_s + \sqrt{\mathrm{SNR}_s\, \pi^2/3}\, (\eta_i - \bar\eta) /
+\sqrt{V}\)</span>, with <span class="math inline">\(c\)</span> solved so
+the pooled prevalence equals <code>binary.prevalence</code>;</li>
+<li>survival: hazard <span class="math inline">\(h_0 \exp\{\alpha_s +
+\sqrt{\mathrm{SNR}_s\, \pi^2/6}\, (\eta_i -
+\bar\eta)/\sqrt{V}\}\)</span>, with censoring (<code>cens.rate</code>)
+solved within each study.</li>
+</ul>
+<p>Batch effects are applied after the outcome is drawn, so they are
+pure technical noise; case-mix shifts are biology and move the outcome
+too. All heterogeneity is drawn from a separate random stream, so with
+the same seed the base data, coefficients and outcome noise are
+identical at every heterogeneity level (for example, a sweep over
+<code>batch.loc.sd</code> changes only the batch effects). With one
+study and no heterogeneity the result equals
+<code>gen_simmba()</code>.</p>
+<p>The truth is in <code>truth$studies</code> (size, holdout flag,
+intercept, SNR), <code>truth$beta</code> (feature x study coefficients,
+also <code>rowData()$beta_Study_1</code>, …), <code>truth$shift</code>,
+<code>truth$batch</code> and, for binary outcomes,
+<code>truth$outcome_intercept</code> (the common intercept <span class="math inline">\(c\)</span>); <code>rowData()$common_signal</code>
+marks the common signal features. <code>colData()$study</code> labels
+the samples, and sample IDs start with the study
+(<code>Study_1_Subject1</code>).</p>
 </div>
 <div id="mediation" class="section level2">
 <h2>Mediation</h2>

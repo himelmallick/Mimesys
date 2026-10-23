@@ -65,6 +65,17 @@ med_mae <- simulate_mediation(
                    tie = 1, de = 0.5)
 )
 metadata(med_mae)$truth$mediation[c("NIE", "NDE", "TE")]
+
+# 5. Several studies with between-study heterogeneity (see "Multi-study
+#    simulation" below); study 3 is held out for testing
+ms_mae <- simulate_multistudy(
+  template, n = c(150, 200, 100), p = 30,
+  heterogeneity = list(effect_cor = 0.5, support_overlap = 0.7,
+                       shift_sd = 0.3, batch_loc_sd = 0.3,
+                       holdout_studies = 3)
+)
+table(colData(ms_mae)$study, colData(ms_mae)$split)
+metadata(ms_mae)$truth$studies         # study sizes, intercepts, SNRs
 ```
 
 Every function that uses random numbers has `seed = 1234` by default and leaves
@@ -79,11 +90,12 @@ current stream.
 | `fit_template()` | Learns the template: marginals, per-view factor models, shared cross-view space |
 | `sim_from_template()` | Null multi-view data (no outcome) |
 | `gen_simmba()` | Null data plus planted outcome signal and a train/test split |
+| `gen_multistudy()` | Several studies with case-mix, batch, coefficient, intercept and SNR heterogeneity |
 | `gen_mediation()` | Exposure, mediators and outcome with exact natural (path-specific) effects |
 | `calibrate_crosstalk()` | Chooses crosstalk so simulated cross-view correlations match the template |
 | `validate_template()` | Calibration plus correlation and marginal diagnostics |
 | `crosstalk_max()` | Largest valid crosstalk per view |
-| `simulate_mimesys()`, `simulate_mimesys_null()`, `simulate_mediation()` | MAE-first wrappers: fit if needed, calibrate crosstalk, simulate, return `MultiAssayExperiment` objects |
+| `simulate_mimesys()`, `simulate_mimesys_null()`, `simulate_multistudy()`, `simulate_mediation()` | MAE-first wrappers: fit if needed, calibrate crosstalk, simulate, return `MultiAssayExperiment` objects |
 | `mimesys_presets()` | Outcome presets for `simulate_mimesys()` |
 | `as_mimesys_mae()`, `simulation_view_matrices()`, `as_mimesys_view_list()` | Conversions between simulation results, MAEs and lists of matrices |
 | `blockwise_feature_correlation()`, `feature_correlation_frobenius()`, `compare_feature_correlation_structure()`, `summarize_simulation()`, `plot_*()` | Diagnostics and plots |
@@ -150,6 +162,24 @@ Takes `n`, `template`, `p`, `crosstalk`, `feature.select`, `feature.jitter`,
 | `return.template` | `FALSE` | Include the fitted template (which contains the source data) in the result. |
 | `...` | | Passed to `fit_template()` when `template` is raw data. |
 
+### `gen_multistudy()`
+
+Takes every `gen_simmba()` argument (with the same defaults) and returns the
+same format, with all studies of a replicate pooled. In addition:
+
+| Argument | Default | Description |
+|---|---|---|
+| `n` | required | Samples per study: one value (with `nstudy`) or one per study. |
+| `nstudy` | `length(n)` | Number of studies. |
+| `effect.cor` | `1` | Correlation of the common signal features' effect sizes between studies. |
+| `support.overlap` | `1` | Fraction of each study's signal features taken from the common set (the rest are study-specific). |
+| `intercept.sd` | `0` | SD of study intercepts (continuous: in signal-SD units; binary: logit scale; survival: log hazard). |
+| `snr.sd` | `0` | SD of the study log-SNRs. |
+| `shift.sd` | `0` | Case mix: SD of study mean shifts of the latent factor scores (biological; enters the outcome). |
+| `batch.loc.sd`, `batch.scale.sd` | `0` | Technical batch effects per study and feature, on the latent scale (added after the outcome). |
+| `holdout.studies` | `NULL` | Studies whose samples all go to the test split. |
+| `train.fraction` | `0.7` | Training share within each non-holdout study (`1` allowed with holdout studies). |
+
 ### `calibrate_crosstalk()` and `validate_template()`
 
 | Argument | Default | Description |
@@ -195,7 +225,8 @@ outcome, signal, null_model, template_args, calibration, train_fraction = 0.7,
 nrep = 1, seed = 1234, return_type = c("mae", "simulation"))`.
 `simulate_mimesys_null()` takes the same arguments without `preset`, `outcome`,
 `signal` and `train_fraction`; `simulate_mediation()` replaces them with
-`mediation`. The option lists use `snake_case` and map to the arguments above:
+`mediation`. `simulate_multistudy()` takes the `simulate_mimesys()` arguments
+plus `nstudy` and `heterogeneity`; `n` is the size of each study. The option lists use `snake_case` and map to the arguments above:
 
 | List | Options (default) | Maps to |
 |---|---|---|
@@ -204,6 +235,7 @@ nrep = 1, seed = 1234, return_type = c("mae", "simulation"))`.
 | `null_model` | `feature_select` (`"random"`), `feature_jitter` (0.2), `view_models`, `back_transform` (`FALSE`) | null-data arguments |
 | `calibration` | `grid` (`seq(0, 1, 0.25)`), `nrep` (5), `nsample` (template size), `max_features_per_view` | `calibrate_crosstalk()` |
 | `mediation` | `n_mediators` (5), `tie` (1), `de` (0), `dir_a`, `dir_b` (1), `effect_type` (`"spiked"`), `exposure_type` (`"binary"`), `exposure_prevalence` (0.5), `n_interactions` (0), `sigma` (1), `outcome_type` (`"continuous"`), `outcome_prevalence` (0.5), `min_variability` (0.2), `n_mc` (5000), `stages`, `stage_links`, `stage_direct` (1), `stage_share` | `gen_mediation()` |
+| `heterogeneity` | `effect_cor` (1), `support_overlap` (1), `intercept_sd` (0), `snr_sd` (0), `shift_sd` (0), `batch_loc_sd` (0), `batch_scale_sd` (0), `holdout_studies` | `gen_multistudy()` |
 | `template_args` | | `fit_template()`, when `template` is raw data |
 
 `crosstalk = "calibrate"` (default) runs `calibrate_crosstalk()` first; a number
@@ -298,6 +330,46 @@ linear predictor does not enter the outcome), the features that drive the
 outcome in `outcome_feature`, the predictor and its parts in `colData()`
 (`Xbeta`, `Xbeta_linear`, ...), and the interaction pairs in
 `metadata(x)$truth$interaction_pairs`.
+
+## Multi-study simulation
+
+`gen_multistudy()` simulates $S$ studies from one template. Every study
+measures the same simulated features (study 1 chooses them). Study $s$
+differs from the others in five ways:
+
+| Heterogeneity | Model | Argument |
+|---|---|---|
+| Case mix | Shared factors $F_i + \delta^{sh}_s$ and view-specific innovations $E_i + \delta^{E}_s$, $\delta \sim N(0, \sigma_{shift}^2 I)$; features follow through the loadings | `shift.sd` |
+| Batch | Latent feature score $z_{ij} \to a_{sj} + b_{sj} z_{ij}$, $a_{sj} \sim N(0, \sigma_a^2)$, $\log b_{sj} \sim N(0, \sigma_b^2)$, then the template marginals | `batch.loc.sd`, `batch.scale.sd` |
+| Signal features | A fraction $\omega$ of each study's signal features come from the common set; the rest are drawn from the other features of that view (following `signal.align`) | `support.overlap` |
+| Effect sizes | $\beta_{sj} = \mu + \sqrt{\rho}\, (\beta_j - \mu) + \sqrt{1 - \rho}\, (\beta^{*}_{sj} - \mu)$, with $\beta^{*}_{sj}$ an independent draw from the effect-size distribution and $\mu$ the mean of that distribution, so the mean and variance are kept and $\mathrm{cor}(\beta_{sj}, \beta_{tj}) = \rho$ | `effect.cor` |
+| Baseline and noise | Study intercept $\alpha_s \sim N(0, \sigma_\alpha^2)$ and $\mathrm{SNR}_s = \mathrm{SNR}\, e^{\epsilon_s}$, $\epsilon_s \sim N(0, \sigma_{snr}^2)$ | `intercept.sd`, `snr.sd` |
+
+The predictor is built on the pooled samples, so study differences are kept.
+Features are standardized over all studies before batch effects (with
+`signal.share`, each view is rescaled by one factor for all studies), and
+$\eta_i = \tilde x_i^\top \beta_{s(i)}$ (plus the Friedman, interaction or
+shared-latent part, which is the same in every study). With $V$ the pooled
+within-study variance of $\eta$:
+
+- continuous: $Y_i = \eta_i + \alpha_{s}\sqrt{V} + \varepsilon_i$, $\varepsilon_i \sim N(0, V / \mathrm{SNR}_s)$;
+- binary: $\mathrm{logit}\, P(Y_i = 1) = c + \alpha_s + \sqrt{\mathrm{SNR}_s\, \pi^2/3}\, (\eta_i - \bar\eta) / \sqrt{V}$, with $c$ solved so the pooled prevalence equals `binary.prevalence`;
+- survival: hazard $h_0 \exp\{\alpha_s + \sqrt{\mathrm{SNR}_s\, \pi^2/6}\, (\eta_i - \bar\eta)/\sqrt{V}\}$, with censoring (`cens.rate`) solved within each study.
+
+Batch effects are applied after the outcome is drawn, so they are pure
+technical noise; case-mix shifts are biology and move the outcome too. All
+heterogeneity is drawn from a separate random stream, so with the same seed
+the base data, coefficients and outcome noise are identical at every
+heterogeneity level (for example, a sweep over `batch.loc.sd` changes only
+the batch effects). With one study and no heterogeneity the result equals
+`gen_simmba()`.
+
+The truth is in `truth$studies` (size, holdout flag, intercept, SNR),
+`truth$beta` (feature x study coefficients, also `rowData()$beta_Study_1`, ...),
+`truth$shift`, `truth$batch` and, for binary outcomes, `truth$outcome_intercept`
+(the common intercept $c$); `rowData()$common_signal` marks the common
+signal features. `colData()$study` labels the samples, and sample IDs start
+with the study (`Study_1_Subject1`).
 
 ## Mediation
 

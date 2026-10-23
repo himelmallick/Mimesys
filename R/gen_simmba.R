@@ -204,20 +204,6 @@ gen_simmba <- function(n,
 
     n <- .check_count(n, "n", min = 2L)
     if (!is.null(seed)) withr::local_seed(seed)
-    outcome.model  <- match.arg(outcome.model)
-    ## Internal codes for the outcome models
-    ygen.mode <- c(linear = "LM", friedman = "Friedman", friedman2 = "Friedman2",
-        shared_latent = "SharedLatent", interaction = "Interaction")[[outcome.model]]
-    shared.latent.function <- match.arg(shared.latent.function)
-    outcome.type   <- match.arg(outcome.type)
-    feature.select <- match.arg(feature.select)
-    if (!is.null(shared.latent.n.factors)) {
-        shared.latent.n.factors <- .check_count(shared.latent.n.factors,
-            "shared.latent.n.factors", min = 1L)
-    }
-    .check_fraction(nonlinear.weight, "nonlinear.weight")
-    .check_fraction(interaction.weight, "interaction.weight")
-    if (!is.null(n.interactions)) .check_count(n.interactions, "n.interactions", min = 1L)
     nrep <- .check_count(nrep, "nrep", min = 1L)
     .check_prevalence(train.fraction, "train.fraction")
     n_train <- round(n * train.fraction)
@@ -225,6 +211,92 @@ gen_simmba <- function(n,
         stop("train.fraction = ", train.fraction, " with n = ", n,
             " leaves an empty training or test set.", call. = FALSE)
     }
+    setup <- .simmba_setup(template, list(...), p = p, crosstalk = crosstalk,
+        feature.select = feature.select, feature.jitter = feature.jitter,
+        view.models = view.models, snr = snr, signal.prob = signal.prob,
+        signal.neg.prob = signal.neg.prob, effect.meanlog = effect.meanlog,
+        effect.sdlog = effect.sdlog, signal.align = signal.align,
+        signal.share = signal.share, friedman.share = friedman.share,
+        outcome.model = outcome.model,
+        shared.latent.function = shared.latent.function,
+        shared.latent.n.factors = shared.latent.n.factors,
+        nonlinear.weight = nonlinear.weight,
+        interaction.weight = interaction.weight, n.interactions = n.interactions,
+        outcome.type = outcome.type, binary.prevalence = binary.prevalence,
+        baseline.hazard = baseline.hazard, cens.rate = cens.rate,
+        cens.lower = cens.lower, cens.upper = cens.upper,
+        back.transform = back.transform)
+    tmpl <- setup$template
+    cfg <- setup$cfg
+
+    trainDat <- testDat <- agreement.emp <- vector("list", nrep)
+    names(trainDat) <- names(testDat) <- names(agreement.emp) <- paste("Rep",
+        seq_len(nrep), sep = "_")
+
+    for (k in seq_len(nrep)) {
+
+        ## 1-5. Null data, spike-in coefficients, predictor and outcome (one
+        ## study, see .simulate_outcome_replicate())
+        res <- .simulate_outcome_replicate(tmpl, n, cfg)
+        pcl <- res$pcl
+        agreement.emp[[k]] <- res$agreement
+
+        ## 6. Train / test split
+        tr.row <- sample.int(n, size = round(n * train.fraction),
+            replace = FALSE)
+        trainDat[[k]] <- .subset_pcl_samples(pcl, tr.row)
+        testDat[[k]]  <- .subset_pcl_samples(pcl, -tr.row)
+    }
+
+    out <- list(trainDat = trainDat, testDat = testDat,
+        template = if (isTRUE(return.template)) tmpl else NULL,
+        template_provenance = tmpl$provenance, p = p, crosstalk = crosstalk,
+        view.models = view.models,
+        cancor = .realized_cancor(tmpl, crosstalk),
+        agreement.emp = agreement.emp,
+        snr = snr, train.fraction = train.fraction,
+        signal.prob = cfg$signal.prob, signal.neg.prob = cfg$signal.neg.prob,
+        effect.meanlog = cfg$effect.meanlog,
+        effect.sdlog = cfg$effect.sdlog, signal.align = signal.align,
+        signal.share = cfg$signal.share, friedman.share = cfg$friedman.share,
+        shared.latent.function = cfg$shared.latent.function,
+        shared.latent.n.factors = cfg$shared.latent.n.factors,
+        nonlinear.weight = nonlinear.weight, back.transform = back.transform,
+        interaction.weight = interaction.weight,
+        n.interactions = n.interactions,
+        nrep = nrep, seed = seed, outcome.model = cfg$outcome.model,
+        outcome.type = cfg$outcome.type, binary.prevalence = binary.prevalence,
+        baseline.hazard = baseline.hazard, cens.rate = cens.rate,
+        cens.lower = cens.lower, cens.upper = cens.upper)
+    out
+}
+
+## Argument checks and template set-up shared by gen_simmba() and
+## gen_multistudy(). Returns the fitted template and the validated settings
+## used by .simulate_outcome_replicate().
+.simmba_setup <- function(template, fit_args, p, crosstalk, feature.select,
+    feature.jitter, view.models, snr, signal.prob, signal.neg.prob,
+    effect.meanlog, effect.sdlog, signal.align, signal.share, friedman.share,
+    outcome.model, shared.latent.function, shared.latent.n.factors,
+    nonlinear.weight, interaction.weight, n.interactions, outcome.type,
+    binary.prevalence, baseline.hazard, cens.rate, cens.lower, cens.upper,
+    back.transform) {
+    outcome.model  <- match.arg(outcome.model, c("linear", "friedman",
+        "friedman2", "shared_latent", "interaction"))
+    ## Internal codes for the outcome models
+    ygen.mode <- c(linear = "LM", friedman = "Friedman", friedman2 = "Friedman2",
+        shared_latent = "SharedLatent", interaction = "Interaction")[[outcome.model]]
+    shared.latent.function <- match.arg(shared.latent.function,
+        c("linear", "friedman", "friedman2"))
+    outcome.type   <- match.arg(outcome.type, c("continuous", "binary", "survival"))
+    feature.select <- match.arg(feature.select, c("random", "variance"))
+    if (!is.null(shared.latent.n.factors)) {
+        shared.latent.n.factors <- .check_count(shared.latent.n.factors,
+            "shared.latent.n.factors", min = 1L)
+    }
+    .check_fraction(nonlinear.weight, "nonlinear.weight")
+    .check_fraction(interaction.weight, "interaction.weight")
+    if (!is.null(n.interactions)) .check_count(n.interactions, "n.interactions", min = 1L)
     if (!is.numeric(snr) || length(snr) != 1L || !is.finite(snr) || snr <= 0) {
         stop("snr must be a single positive number.", call. = FALSE)
     }
@@ -235,7 +307,7 @@ gen_simmba <- function(n,
     }
 
     ## 0. Fit the template once (skipped if a fitted template is supplied)
-    tmpl  <- .resolve_template(template, list(...))
+    tmpl  <- .resolve_template(template, fit_args)
     views <- tmpl$views
     M     <- length(views)
     signal.prob     <- .per_view_values(signal.prob, views, "signal.prob")
@@ -261,214 +333,29 @@ gen_simmba <- function(n,
             call. = FALSE)
     }
     if (identical(ygen.mode, "SharedLatent")) {
-        gamma_check <- gamma_named
         if (tmpl$shared.rank == 0L) {
             warning("The template has no shared latent factors; SharedLatent outcomes fall back ",
                 "to the average of the view-specific linear predictors.", call. = FALSE)
-        } else if (all(gamma_check == 0)) {
+        } else if (all(gamma_named == 0)) {
             warning("outcome.model = \"shared_latent\" with crosstalk = 0: shared factors do not enter ",
                 "any simulated feature, so the outcome is unrelated to the features.", call. = FALSE)
         }
     }
-
-    trainDat <- testDat <- agreement.emp <- vector("list", nrep)
-    names(trainDat) <- names(testDat) <- names(agreement.emp) <- paste("Rep",
-        seq_len(nrep), sep = "_")
-
-    for (k in seq_len(nrep)) {
-
-        ## 1. Null multiview data from the template
-        pcl <- .sim_from_template_impl(tmpl, n = n, p = p,
-            crosstalk = crosstalk,
-            feature.select = feature.select,
-            feature.jitter = feature.jitter,
-            view.models = view.models,
-            back.transform = if (isTRUE(back.transform)) "both" else FALSE)
-        X  <- t(as.matrix(pcl$feature_table))
-        fm <- pcl$feature_metadata
-
-        ## 2. Spike-in coefficients, view by view in template order
-        ## (table(featureType) would sort views alphabetically and misassign de.*)
-        beta0 <- unlist(lapply(seq_len(M), function(m) {
-            sel <- fm$featureType == views[m]
-            .draw_beta_view(sum(sel), fm$shared_loading[sel], signal.prob[m],
-                signal.neg.prob[m],
-                effect.meanlog[m], effect.sdlog[m], signal.align)
-        }))
-        ## 3. Linear predictor on standardized features, so coefficients are
-        ## per-SD effects and views on very different measurement scales (e.g.
-        ## counts vs. intensities in the millions) contribute comparably. Then
-        ## optional view-level signal balancing.
-        Xs <- .standardize_columns(X)
-        view_pred <- vapply(views, function(v) {
-            sel <- fm$featureType == v
-            as.numeric(Xs[, sel, drop = FALSE] %*% beta0[sel])
-            }, numeric(n))
-        view_pred <- matrix(view_pred, nrow = n, dimnames = list(NULL,
-            views))
-        if (!is.null(signal.share)) {
-            scaled <- .rescale_signal_by_view(beta0, view_pred, fm$featureType,
-                views, signal.share)
-            beta0 <- scaled$beta
-            view_pred <- scaled$view_pred
-        }
-        eta_lin <- rowSums(view_pred)
-        shared_res <- .shared_latent_predictor(
-            pcl,
-            view_pred,
-            fun = shared.latent.function,
-            n_factors = shared.latent.n.factors,
-            nonlinear.weight = nonlinear.weight
-        )
-        eta_shared <- as.numeric(shared_res)
-        shared_fallback <- isTRUE(attr(shared_res, "fallback"))
-        A <- suppressWarnings(stats::cor(view_pred))
-        A[!is.finite(A)] <- 0
-        agreement.emp[[k]] <- A
-
-        nfeat <- nrow(fm)
-        friedman_term <- interaction_term <- rep(FALSE, nfeat)
-        interaction_pairs <- NULL
-
-        ## Optional non-linear Friedman component
-        if (ygen.mode %in% c("Friedman", "Friedman2")) {
-            if (length(beta0) < 5L) {
-                stop("Friedman outcomes need at least five simulated features in total; ",
-                    "got ", length(beta0), ". Increase p.", call. = FALSE)
-            }
-            nonzero_index <- which(beta0 != 0)
-            candidate_index <- if (length(nonzero_index) >= 5L) nonzero_index else seq_along(beta0)
-            friedman_index <- .sample_friedman_features(candidate_index,
-                fm$featureType, views, friedman.share)
-            friedman_term[friedman_index] <- TRUE
-            X.friedman <- .rank_to_unit_interval(X[, friedman_index,
-                drop = FALSE])
-            Xbeta.friedman <- .friedman_response(X.friedman)
-            pcl$sample_metadata$Xbeta_friedman <- Xbeta.friedman
-        }
-
-        ## Optional cross-view interaction component
-        if (identical(ygen.mode, "Interaction")) {
-            interaction_pairs <- .sample_interaction_pairs(beta0,
-                fm$featureType, views, n.interactions)
-            eta_int <- rowSums(
-                Xs[, interaction_pairs$i, drop = FALSE] * Xs[,
-                    interaction_pairs$j, drop = FALSE]
-            )
-            interaction_term[c(interaction_pairs$i,
-                interaction_pairs$j)] <- TRUE
-            interaction_pairs <- data.frame(
-                feature_x = fm$featureID[interaction_pairs$i],
-                view_x = fm$featureType[interaction_pairs$i],
-                feature_y = fm$featureID[interaction_pairs$j],
-                view_y = fm$featureType[interaction_pairs$j],
-                stringsAsFactors = FALSE
-            )
-            pcl$sample_metadata$Xbeta_interaction <- eta_int
-        }
-
-        pcl$sample_metadata$Xbeta_linear <- eta_lin
-        pcl$sample_metadata$Xbeta_shared <- eta_shared
-
-        ## 4. Final linear predictor
-        eta <- switch(ygen.mode,
-            LM           = eta_lin,
-            Friedman     = Xbeta.friedman,
-            Friedman2    = .mix_signals(eta_lin, Xbeta.friedman,
-                nonlinear.weight),
-            SharedLatent = eta_shared,
-            Interaction  = .mix_signals(eta_lin, eta_int, interaction.weight))
-        pcl$sample_metadata$Xbeta <- eta
-
-        ## Ground truth: beta is kept only where the linear predictor enters Y
-        uses_linear <- switch(ygen.mode,
-            LM = TRUE,
-            Friedman = FALSE,
-            Friedman2 = nonlinear.weight < 1,
-            SharedLatent = shared_fallback,
-            Interaction = interaction.weight < 1)
-        if (!uses_linear) beta0[] <- 0
-        pcl$feature_metadata$beta <- beta0
-        pcl$feature_metadata$friedman_term <- friedman_term
-        pcl$feature_metadata$interaction_term <- interaction_term
-        ## Components with zero weight do not enter the outcome
-        if (identical(ygen.mode, "Friedman2") && nonlinear.weight <= 0) {
-            friedman_term[] <- FALSE
-        }
-        if (identical(ygen.mode, "Interaction") && interaction.weight <= 0) {
-            interaction_term[] <- FALSE
-            interaction_pairs <- NULL
-        }
-        pcl$feature_metadata$friedman_term <- friedman_term
-        pcl$feature_metadata$interaction_term <- interaction_term
-        pcl$feature_metadata$outcome_feature <- beta0 != 0 | friedman_term | interaction_term
-        pcl$truth$interaction_pairs <- interaction_pairs
-
-        ## 5. Outcome
-        if (outcome.type == "continuous") {
-            sigma2 <- as.vector(stats::var(eta) / snr)
-            pcl$sample_metadata$Y <- as.vector(eta + stats::rnorm(n) * sqrt(sigma2))
-        } else if (outcome.type == "binary") {
-            eta <- .standardize_predictor(eta) * sqrt(snr * pi^2 / 3)
-            eta <- eta + .logistic_intercept(eta, binary.prevalence)
-            pcl$sample_metadata$Xbeta <- eta
-            pcl$sample_metadata$Y <- stats::rbinom(n, size = 1,
-                prob = stats::plogis(eta))
-        } else if (outcome.type == "survival") {
-            eta <- .standardize_predictor(eta) * sqrt(snr * pi^2 / 6)
-            pcl$sample_metadata$Xbeta <- eta
-            h  <- as.vector(baseline.hazard * exp(eta))
-            T0 <- stats::rexp(n, rate = h)
-            C  <- .draw_censoring(T0, cens.rate, cens.lower, cens.upper)
-            pcl$sample_metadata$time   <- pmin(T0, C)
-            pcl$sample_metadata$status <- as.integer(C >= T0)
-        }
-
-        ## Optionally return features on the original measurement scale. Outcomes
-        ## above were generated on the fitted scale.
-        if (!is.null(pcl$original_table)) {
-            pcl$feature_table <- pcl$original_table
-            pcl$original_table <- NULL
-            pcl$feature_metadata$scale <- "original"
-        }
-
-        ## 6. Train / test split
-        train <- test <- pcl
-        tr.row <- sample.int(n, size = round(n * train.fraction),
-            replace = FALSE)
-        train$sample_metadata <- pcl$sample_metadata[tr.row, , drop = FALSE]
-        test$sample_metadata  <- pcl$sample_metadata[-tr.row, , drop = FALSE]
-        train$feature_table   <- pcl$feature_table[, tr.row, drop = FALSE]
-        test$feature_table    <- pcl$feature_table[, -tr.row, drop = FALSE]
-        train$truth$scores    <- pcl$truth$scores[tr.row, , drop = FALSE]
-        test$truth$scores     <- pcl$truth$scores[-tr.row, , drop = FALSE]
-        train$truth$shared    <- pcl$truth$shared[tr.row, , drop = FALSE]
-        test$truth$shared     <- pcl$truth$shared[-tr.row, , drop = FALSE]
-
-        trainDat[[k]] <- train
-        testDat[[k]]  <- test
-    }
-
-    out <- list(trainDat = trainDat, testDat = testDat,
-        template = if (isTRUE(return.template)) tmpl else NULL,
-        template_provenance = tmpl$provenance, p = p, crosstalk = crosstalk,
-        view.models = view.models,
-        cancor = .realized_cancor(tmpl, crosstalk),
-        agreement.emp = agreement.emp,
-        snr = snr, train.fraction = train.fraction,
-        signal.prob = signal.prob, signal.neg.prob = signal.neg.prob, effect.meanlog = effect.meanlog,
-        effect.sdlog = effect.sdlog, signal.align = signal.align,
-        signal.share = signal.share, friedman.share = friedman.share,
-        shared.latent.function = shared.latent.function,
+    list(template = tmpl, cfg = list(
+        p = p, crosstalk = crosstalk, feature.select = feature.select,
+        feature.jitter = feature.jitter, view.models = view.models,
+        back.transform = back.transform, snr = snr,
+        signal.prob = signal.prob, signal.neg.prob = signal.neg.prob,
+        effect.meanlog = effect.meanlog, effect.sdlog = effect.sdlog,
+        signal.align = signal.align, signal.share = signal.share,
+        friedman.share = friedman.share, outcome.model = outcome.model,
+        ygen.mode = ygen.mode, shared.latent.function = shared.latent.function,
         shared.latent.n.factors = shared.latent.n.factors,
-        nonlinear.weight = nonlinear.weight, back.transform = back.transform,
-        interaction.weight = interaction.weight,
-        n.interactions = n.interactions,
-        nrep = nrep, seed = seed, outcome.model = outcome.model,
+        nonlinear.weight = nonlinear.weight,
+        interaction.weight = interaction.weight, n.interactions = n.interactions,
         outcome.type = outcome.type, binary.prevalence = binary.prevalence,
         baseline.hazard = baseline.hazard, cens.rate = cens.rate,
-        cens.lower = cens.lower, cens.upper = cens.upper)
-    out
+        cens.lower = cens.lower, cens.upper = cens.upper))
 }
 
 

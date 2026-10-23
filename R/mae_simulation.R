@@ -428,32 +428,10 @@ simulate_mimesys <- function(template,
     .check_count(nrep, "nrep", min = 1L)
     .check_prevalence(train_fraction, "train_fraction")
     if (!is.null(seed)) withr::local_seed(seed)
-    if (!is.character(preset) || length(preset) != 1L) {
-        stop("preset must be a single preset name.", call. = FALSE)
-    }
-    preset_settings <- .mimesys_preset_options(preset)
-
-    outcome_defaults <- list(
-        model = "linear", type = "continuous", snr = 1,
-        friedman_share = NULL, shared_latent_function = "linear",
-        shared_latent_n_factors = NULL, nonlinear_weight = 0.5,
-        interaction_weight = 0.5, n_interactions = NULL,
-        prevalence = 0.5, baseline_hazard = 1,
-        cens_rate = NULL, cens_lower = 1, cens_upper = 3
-    )
-    outcome_defaults <- utils::modifyList(outcome_defaults,
-        preset_settings$outcome)
-    if (is.character(outcome)) outcome <- list(model = outcome)
-    outcome <- .mimesys_merge_options(outcome, outcome_defaults, "outcome")
-    outcome$model <- .mimesys_outcome_mode(outcome$model)
-
-    signal_defaults <- list(
-        prob = 0.1, neg_prob = 0.5, effect_meanlog = 1,
-        effect_sdlog = 0.4, align = 1, share = NULL
-    )
-    signal_defaults <- utils::modifyList(signal_defaults,
-        preset_settings$signal)
-    signal <- .mimesys_merge_options(signal, signal_defaults, "signal")
+    opts <- .mimesys_outcome_signal_options(preset, outcome, signal)
+    preset_settings <- opts$preset
+    outcome <- opts$outcome
+    signal <- opts$signal
 
     setup <- .mimesys_wrapper_setup(template, n = n, p = p, nrep = nrep,
         crosstalk = crosstalk, null_model = null_model,
@@ -490,6 +468,38 @@ simulate_mimesys <- function(template,
 
     maes <- lapply(seq_len(sim$nrep), function(i) as_mimesys_mae(sim, rep = i))
     .mimesys_collect_maes(maes, .mimesys_simulation_settings(sim))
+}
+
+## Preset, outcome and signal options of the outcome wrappers
+## (simulate_mimesys() and simulate_multistudy())
+.mimesys_outcome_signal_options <- function(preset, outcome, signal) {
+    if (!is.character(preset) || length(preset) != 1L) {
+        stop("preset must be a single preset name.", call. = FALSE)
+    }
+    preset_settings <- .mimesys_preset_options(preset)
+
+    outcome_defaults <- list(
+        model = "linear", type = "continuous", snr = 1,
+        friedman_share = NULL, shared_latent_function = "linear",
+        shared_latent_n_factors = NULL, nonlinear_weight = 0.5,
+        interaction_weight = 0.5, n_interactions = NULL,
+        prevalence = 0.5, baseline_hazard = 1,
+        cens_rate = NULL, cens_lower = 1, cens_upper = 3
+    )
+    outcome_defaults <- utils::modifyList(outcome_defaults,
+        preset_settings$outcome)
+    if (is.character(outcome)) outcome <- list(model = outcome)
+    outcome <- .mimesys_merge_options(outcome, outcome_defaults, "outcome")
+    outcome$model <- .mimesys_outcome_mode(outcome$model)
+
+    signal_defaults <- list(
+        prob = 0.1, neg_prob = 0.5, effect_meanlog = 1,
+        effect_sdlog = 0.4, align = 1, share = NULL
+    )
+    signal_defaults <- utils::modifyList(signal_defaults,
+        preset_settings$signal)
+    signal <- .mimesys_merge_options(signal, signal_defaults, "signal")
+    list(preset = preset_settings, outcome = outcome, signal = signal)
 }
 
 #' @export
