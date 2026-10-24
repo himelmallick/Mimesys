@@ -15,6 +15,18 @@
   heterogeneity levels for a given seed.
 * `simulate_multistudy()` is the MAE-first wrapper, with the presets and
   options of `simulate_mimesys()` plus a `heterogeneity` list.
+* One template per study: `fit_study_templates()` fits a template to each
+  cohort on the views and features every cohort has, and `gen_multistudy()` /
+  `simulate_multistudy()` accept that list (or the raw data sets) so each
+  study keeps its own cohort's marginals and correlation structure on the
+  same simulated features. Crosstalk can be set, or calibrated, per study.
+* Bug fixes: a list of matrices without sample IDs (row names) whose views have
+  different numbers of samples is now an error; it used to be truncated to
+  the smallest view without a warning. `compare_feature_correlation_structure()`
+  now counts each pair of distinct features once: self-correlations are left
+  out and each cross-view block appears once (it used to keep the 1s on the
+  diagonal, which inflated the within-view scores, and list every pair in
+  both orientations).
 * Internal: `gen_simmba()` now runs on the same outcome engine with one study;
   its results are unchanged (verified bit-for-bit). `sim_from_template()`'s
   internal mapping can map a second set of latent scores (used for batch

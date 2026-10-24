@@ -21,6 +21,12 @@
     het = .no_heterogeneity(), study_names = NULL) {
     S <- length(n_by_study)
     multi <- !is.null(study_names)
+    ## One template for every study, or one template per study (same views and
+    ## features, e.g. from fit_study_templates()); crosstalk per study
+    tmpls <- if (inherits(tmpl, "mimesys_template")) rep(list(tmpl), S) else tmpl
+    per_template <- !inherits(tmpl, "mimesys_template")
+    crosstalk_s <- if (is.list(cfg$crosstalk)) cfg$crosstalk else rep(list(cfg$crosstalk), S)
+    tmpl <- tmpls[[1]]
     views <- tmpl$views
     M <- length(views)
 
@@ -46,13 +52,16 @@
                 res$Z
             }
         } else NULL
-        pcl_s <- .sim_from_template_impl(tmpl, n = n_by_study[s], p = cfg$p,
-            crosstalk = cfg$crosstalk,
+        structure_s <- if (per_template && s > 1L) {
+            .map_structure(structure, tmpls[[1]], tmpls[[s]], cfg$feature.jitter)
+        } else structure
+        pcl_s <- .sim_from_template_impl(tmpls[[s]], n = n_by_study[s], p = cfg$p,
+            crosstalk = crosstalk_s[[s]],
             feature.select = cfg$feature.select,
             feature.jitter = cfg$feature.jitter,
             view.models = cfg$view.models,
             back.transform = if (isTRUE(cfg$back.transform)) "both" else FALSE,
-            .structure = structure, .latent_hook = shift_hook,
+            .structure = structure_s, .latent_hook = shift_hook,
             .observed_hook = batch_hook)
         if (is.null(structure)) structure <- attr(pcl_s, "structure")
         if (!is.null(draws$shift)) {
@@ -312,8 +321,17 @@
         sample_metadata = sample_metadata,
         feature_metadata = first$feature_metadata,
         truth = first$truth)
-    out$truth$scores <- do.call(rbind, lapply(pcls, function(x) x$truth$scores))
-    out$truth$shared <- do.call(rbind, lapply(pcls, function(x) x$truth$shared))
+    ## Latent truth: pooled when every study has the same latent dimensions
+    ## (always with one template); with per-study templates of different
+    ## ranks it is not comparable across studies and is left out
+    for (name in c("scores", "shared")) {
+        parts <- lapply(pcls, function(x) x$truth[[name]])
+        same <- length(unique(vapply(parts, ncol, integer(1)))) == 1L
+        out$truth[name] <- list(if (same) do.call(rbind, parts) else NULL)
+    }
+    out$truth$crosstalk <- lapply(pcls, function(x) x$truth$crosstalk)
+    out$truth$cancor <- lapply(pcls, function(x) x$truth$cancor)
+    names(out$truth$crosstalk) <- names(out$truth$cancor) <- study_names
     for (name in c("original_table", "observed_table", "observed_original_table")) {
         out[name] <- list(bind_tables(name))
     }

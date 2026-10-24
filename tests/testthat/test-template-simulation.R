@@ -1655,3 +1655,33 @@ test_that("shared helpers: weighted logistic intercept and argument checks", {
     expect_error(MimeSys:::.check_count(2.5, "k"), "integer")
     expect_error(MimeSys:::.resolve_template(list(), 1, "template_args"), "named list")
 })
+
+test_that("views without sample IDs must have the same number of samples", {
+    set.seed(1)
+    a <- matrix(rnorm(30 * 5), 30)
+    b <- matrix(rnorm(25 * 4), 25)
+    expect_error(as_mimesys_view_list(list(A = a, B = b)), "cannot be matched")
+    expect_error(fit_template(list(A = a, B = b), shared.rank = 0), "cannot be matched")
+    b2 <- matrix(rnorm(30 * 4), 30)
+    expect_equal(fit_template(list(A = a, B = b2), shared.rank = 0)$n0, 30)
+    v <- as_mimesys_view_list(list(A = a, B = b2))
+    expect_null(attr(v$A, "mimesys_generated_ids"))
+})
+
+test_that("compare_feature_correlation_structure() counts each feature pair once", {
+    data(stelzer_mae, package = "MimeSys", envir = environment())
+    tmpl <- fit_template(stelzer_mae, shared.rank = 2)
+    sim <- gen_simmba(n = 53, template = tmpl, nrep = 1, seed = 1)
+    obs <- blockwise_feature_correlation(tmpl$observed)
+    simulated <- blockwise_feature_correlation(
+        simulation_view_matrices(sim, feature_names = "template_feature"))
+    res <- compare_feature_correlation_structure(obs, simulated, return_pairs = TRUE)
+    expect_false(any(res$pairs$feature_x == res$pairs$feature_y))
+    key <- apply(res$pairs[, c("feature_x", "feature_y")], 1, function(x) paste(sort(x), collapse = "|"))
+    expect_false(anyDuplicated(key) > 0)
+    ## Each unordered pair of views appears once
+    vp <- apply(res$summary[, c("view_x", "view_y")], 1, function(x) paste(sort(x), collapse = "|"))
+    expect_false(anyDuplicated(vp) > 0)
+    p <- vapply(tmpl$fits, function(f) ncol(f$qmat), integer(1))
+    expect_equal(res$summary$n[res$summary$diagonal_block], unname(p * (p - 1) / 2))
+})

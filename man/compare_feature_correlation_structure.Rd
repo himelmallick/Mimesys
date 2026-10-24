@@ -27,7 +27,9 @@ of feature pairs. If \code{return_pairs = TRUE}, a list with \code{summary} and
 Correlates the vector of observed feature-feature correlations with the
 matching vector of simulated feature-feature correlations within each view
 block. This asks whether the simulated data preserve the pattern of the
-correlation matrix, not only its average magnitude.
+correlation matrix, not only its average magnitude. Each pair of distinct
+features is counted once: self-correlations are left out, and each
+cross-view block appears once (views in alphabetical order).
 }
 \examples{
 data(stelzer_mae)

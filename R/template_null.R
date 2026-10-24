@@ -522,11 +522,12 @@ sim_from_template <- function(template, n, p = NULL, crosstalk = 1,
     sample_ids <- paste0("Subject", seq_len(n))
 
     X_list <- meta_list <- Xorig_list <- vector("list", M)
-    parent_list <- lam_list <- offspring_list <- vector("list", M)
+    parent_list <- lam_list <- offspring_list <- other_list <- vector("list", M)
     if (!is.null(.structure)) {
         parent_list <- .structure$parent
         lam_list <- .structure$lam
         offspring_list <- .structure$offspring
+        if (!is.null(.structure$other)) other_list <- .structure$other
     }
     for (m in seq_len(M)) {
         if (!is.null(.structure)) next
@@ -549,6 +550,7 @@ sim_from_template <- function(template, n, p = NULL, crosstalk = 1,
             Lam[h > 0.99, ] <- Lam[h > 0.99, ,
                 drop = FALSE] * sqrt(0.99 / h[h > 0.99])
             offspring <- c(rep(FALSE, p0[m]), rep(TRUE, length(extra)))
+            other_list[[m]] <- other
         }
         parent_list[[m]] <- parent
         lam_list[[m]] <- Lam
@@ -707,7 +709,7 @@ sim_from_template <- function(template, n, p = NULL, crosstalk = 1,
         }
     }
     attr(out, "structure") <- list(parent = parent_list, lam = lam_list,
-        offspring = offspring_list)
+        offspring = offspring_list, other = other_list)
     out
 }
 
@@ -1061,4 +1063,36 @@ crosstalk_max <- function(template, per.view = FALSE) {
     lo <- floor(h)
     hi <- pmin(lo + 1, n0)
     sorted[lo] + (h - lo) * (sorted[hi] - sorted[lo])
+}
+
+## Carry a structure (simulated features and their loadings) from template
+## `from` to template `to`, which has the same views and feature names: the
+## same named parent features, and offspring built from the same pairs of
+## features, with `to`'s own loadings.
+.map_structure <- function(structure, from, to, feature.jitter) {
+    M <- length(to$views)
+    out <- list(parent = vector("list", M), lam = vector("list", M),
+        offspring = structure$offspring, other = vector("list", M))
+    for (m in seq_len(M)) {
+        names_from <- colnames(from$fits[[m]]$qmat)
+        names_to <- colnames(to$fits[[m]]$qmat)
+        parent <- match(names_from[structure$parent[[m]]], names_to)
+        if (anyNA(parent)) {
+            stop("Templates differ in the features of view ", to$views[m],
+                "; fit them with fit_study_templates().", call. = FALSE)
+        }
+        Lam <- to$fits[[m]]$Lambda[parent, , drop = FALSE]
+        off <- structure$offspring[[m]]
+        if (any(off)) {
+            other <- match(names_from[structure$other[[m]]], names_to)
+            Lam[off, ] <- sqrt(1 - feature.jitter) * Lam[off, , drop = FALSE] +
+                sqrt(feature.jitter) * to$fits[[m]]$Lambda[other, , drop = FALSE]
+            h <- rowSums(Lam^2)
+            Lam[h > 0.99, ] <- Lam[h > 0.99, , drop = FALSE] * sqrt(0.99 / h[h > 0.99])
+            out$other[[m]] <- other
+        }
+        out$parent[[m]] <- parent
+        out$lam[[m]] <- Lam
+    }
+    out
 }

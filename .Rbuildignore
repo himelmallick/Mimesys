@@ -11,3 +11,4 @@
 ^inst/extdata/StelzerDOS\.RData$
 ^.*\.Rhistory$
 ^mediation_spiking$
+^ibd_trial$

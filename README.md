@@ -90,7 +90,8 @@ current stream.
 | `fit_template()` | Learns the template: marginals, per-view factor models, shared cross-view space |
 | `sim_from_template()` | Null multi-view data (no outcome) |
 | `gen_simmba()` | Null data plus planted outcome signal and a train/test split |
-| `gen_multistudy()` | Several studies with case-mix, batch, coefficient, intercept and SNR heterogeneity |
+| `gen_multistudy()` | Several studies with case-mix, batch, coefficient, intercept and SNR heterogeneity, from one template or one template per study |
+| `fit_study_templates()` | One template per study (real cohort) on the views and features every study has |
 | `gen_mediation()` | Exposure, mediators and outcome with exact natural (path-specific) effects |
 | `calibrate_crosstalk()` | Chooses crosstalk so simulated cross-view correlations match the template |
 | `validate_template()` | Calibration plus correlation and marginal diagnostics |
@@ -169,6 +170,7 @@ same format, with all studies of a replicate pooled. In addition:
 
 | Argument | Default | Description |
 |---|---|---|
+| `template` | required | One template (or data set) for every study, or one per study: a list from `fit_study_templates()`, or a list of data sets (fitted here). |
 | `n` | required | Samples per study: one value (with `nstudy`) or one per study. |
 | `nstudy` | `length(n)` | Number of studies. |
 | `effect.cor` | `1` | Correlation of the common signal features' effect sizes between studies. |
@@ -226,7 +228,9 @@ nrep = 1, seed = 1234, return_type = c("mae", "simulation"))`.
 `simulate_mimesys_null()` takes the same arguments without `preset`, `outcome`,
 `signal` and `train_fraction`; `simulate_mediation()` replaces them with
 `mediation`. `simulate_multistudy()` takes the `simulate_mimesys()` arguments
-plus `nstudy` and `heterogeneity`; `n` is the size of each study. The option lists use `snake_case` and map to the arguments above:
+plus `nstudy` and `heterogeneity`; `n` is the size of each study, and
+`template` may hold one template (or data set) per study, in which case
+crosstalk is calibrated for each study separately. The option lists use `snake_case` and map to the arguments above:
 
 | List | Options (default) | Maps to |
 |---|---|---|
@@ -333,9 +337,32 @@ outcome in `outcome_feature`, the predictor and its parts in `colData()`
 
 ## Multi-study simulation
 
-`gen_multistudy()` simulates $S$ studies from one template. Every study
-measures the same simulated features (study 1 chooses them). Study $s$
-differs from the others in five ways:
+`gen_multistudy()` simulates $S$ studies, either all from one template or
+each from its own template (one real cohort per study). Every study measures
+the same simulated features (study 1 chooses them).
+
+**One template per study.** `fit_study_templates()` fits a template to each
+cohort on the views and features that every cohort has (features constant or
+missing in any cohort are dropped everywhere), so the templates line up:
+
+```r
+tmpls <- fit_study_templates(list(CohortA = mae_a, CohortB = mae_b),
+                             view.transform = c(Metabolome = "log1p"))
+sim <- gen_multistudy(n = c(200, 150), template = tmpls, p = 50)
+```
+
+Each study is then simulated from its own cohort's marginals, factor loadings
+and cross-view structure, on the same named features (features added beyond
+the template size are built from the same feature pairs in every study). The
+real between-cohort differences in distributions and correlations carry over,
+and the heterogeneity settings below add to them. Signal coefficients are
+drawn once on the shared features; with `signal.align` they follow study 1's
+shared direction. Crosstalk can be given per study as a list. If the cohort
+templates have different ranks, the latent scores are not comparable and
+`truth$scores`/`truth$shared` are left out (and `shared_latent` outcomes need
+templates fitted with the same `shared.rank`).
+
+In addition, study $s$ can differ from the others in five ways:
 
 | Heterogeneity | Model | Argument |
 |---|---|---|

@@ -53,9 +53,18 @@ gen_multistudy(
 \item{n}{Samples per study: one value for every study (with \code{nstudy}) or one
 value per study.}
 
-\item{template}{A fitted \code{mimesys_template} (see \code{\link[=fit_template]{fit_template()}}) or a named
-list of sample x feature matrices, which is then fitted with
-\code{fit_template(template, ...)}.}
+\item{template}{The template(s) to simulate from:
+\itemize{
+\item one fitted \code{mimesys_template} (see \code{\link[=fit_template]{fit_template()}}) or raw data for
+one (a \code{MultiAssayExperiment} or a named list of sample x feature
+matrices, fitted with \code{fit_template(template, ...)}), used for every
+study; or
+\item one template per study: a list of fitted templates with the same views
+and features (from \code{\link[=fit_study_templates]{fit_study_templates()}}), or a list of raw data sets,
+one per study, fitted here with \code{fit_study_templates(template, ...)}.
+Each study then has its own cohort's marginals, factor structure and
+cross-view dependence on the same simulated features.
+}}
 
 \item{nstudy}{Number of studies. Defaults to \code{length(n)}.}
 
@@ -63,7 +72,7 @@ list of sample x feature matrices, which is then fitted with
 common signal features, in [0, 1]. A study coefficient is
 \code{mu + sqrt(effect.cor) * (b - mu) + sqrt(1 - effect.cor) * (b_s - mu)},
 with \code{b} the common draw, \code{b_s} an independent draw from the same
-effect-size distribution and \code{mu} the view's mean common effect, so the
+effect-size distribution and \code{mu} the mean of that distribution, so the
 mean and variance of the coefficients are kept (the two-peaked +/- shape
 of the effect sizes is smoothed). The fresh draws have their own signs,
 so lowering \code{effect.cor} also loosens the sign agreement with the shared
@@ -110,11 +119,9 @@ The other studies are split by \code{train.fraction}.}
 single integer to use the same count for every view, an unnamed vector in
 template view order, or a named vector with one value per view.}
 
-\item{crosstalk}{Multiplier on template cross-view dependence. Use a scalar
-for the same value in every view or one value per view. A value of 0
-removes
-shared latent structure, 1 uses the fitted template level, and values above
-1 amplify shared structure up to \code{crosstalk_max(template)}.}
+\item{crosstalk}{Multiplier on template cross-view dependence (see
+\code{\link[=gen_simmba]{gen_simmba()}}). With one template per study, a list of one value per
+study is also accepted.}
 
 \item{feature.select}{Feature choice rule passed to
 \code{sim_from_template()}
@@ -280,9 +287,17 @@ one study and no heterogeneity, the result is identical to
 \code{\link[=gen_simmba]{gen_simmba()}} with the same seed.
 }
 \details{
-Samples are simulated study by study from the template; study 1 chooses the
-simulated features and the other studies reuse them. Each study's case-mix
-shift and batch effects are drawn right after its latent scores.
+Samples are simulated study by study; study 1 chooses the simulated features
+and the other studies reuse them. With one template per study, the same
+named features (and the same feature pairs for features added beyond the
+template's own, \code{p} above the template size) are simulated through each
+study's own template, so real between-cohort differences in distributions
+and correlations carry over; the heterogeneity arguments add to them.
+Signal positions under \code{signal.align} follow study 1's shared loadings.
+When the templates have different ranks, the latent truth
+(\code{truth$scores}, \code{truth$shared}) is not comparable across studies and is
+not returned. Each study's case-mix shift and batch effects are drawn right
+after its latent scores.
 
 The outcome is generated on the pooled samples. Features are standardized
 over all studies (before batch effects), so study differences in the

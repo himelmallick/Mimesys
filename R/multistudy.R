@@ -9,9 +9,16 @@
 #'
 #' @param n Samples per study: one value for every study (with `nstudy`) or one
 #'   value per study.
-#' @param template A fitted `mimesys_template` (see [fit_template()]) or a named
-#'   list of sample x feature matrices, which is then fitted with
-#'   `fit_template(template, ...)`.
+#' @param template The template(s) to simulate from:
+#'   * one fitted `mimesys_template` (see [fit_template()]) or raw data for
+#'     one (a `MultiAssayExperiment` or a named list of sample x feature
+#'     matrices, fitted with `fit_template(template, ...)`), used for every
+#'     study; or
+#'   * one template per study: a list of fitted templates with the same views
+#'     and features (from [fit_study_templates()]), or a list of raw data sets,
+#'     one per study, fitted here with `fit_study_templates(template, ...)`.
+#'     Each study then has its own cohort's marginals, factor structure and
+#'     cross-view dependence on the same simulated features.
 #' @param nstudy Number of studies. Defaults to `length(n)`.
 #' @param effect.cor Correlation between studies of the effect sizes of the
 #'   common signal features, in \[0, 1\]. A study coefficient is
@@ -56,14 +63,25 @@
 #' @param train.fraction Proportion of samples of each non-holdout study
 #'   assigned to the training split. May be `1` when `holdout.studies` is
 #'   supplied.
+#' @param crosstalk Multiplier on template cross-view dependence (see
+#'   [gen_simmba()]). With one template per study, a list of one value per
+#'   study is also accepted.
 #' @param seed Random seed. The global random-number state is restored when the
 #'   function returns. Use `NULL` to use the current random state.
 #' @inheritParams gen_simmba
 #'
 #' @details
-#' Samples are simulated study by study from the template; study 1 chooses the
-#' simulated features and the other studies reuse them. Each study's case-mix
-#' shift and batch effects are drawn right after its latent scores.
+#' Samples are simulated study by study; study 1 chooses the simulated features
+#' and the other studies reuse them. With one template per study, the same
+#' named features (and the same feature pairs for features added beyond the
+#' template's own, `p` above the template size) are simulated through each
+#' study's own template, so real between-cohort differences in distributions
+#' and correlations carry over; the heterogeneity arguments add to them.
+#' Signal positions under `signal.align` follow study 1's shared loadings.
+#' When the templates have different ranks, the latent truth
+#' (`truth$scores`, `truth$shared`) is not comparable across studies and is
+#' not returned. Each study's case-mix shift and batch effects are drawn right
+#' after its latent scores.
 #'
 #' The outcome is generated on the pooled samples. Features are standardized
 #' over all studies (before batch effects), so study differences in the
@@ -156,9 +174,25 @@ gen_multistudy <- function(n,
     ...) {
 
     if (!is.null(seed)) withr::local_seed(seed)
+    ## One template for all studies, or one per study (fitted, or raw data
+    ## fitted here with fit_study_templates())
+    tmpl_list <- .study_template_list(template, list(...))
+    if (!is.null(tmpl_list) && is.null(nstudy) && length(n) == 1L) {
+        nstudy <- length(tmpl_list)
+    }
     n_by_study <- .study_sizes(n, nstudy)
     S <- length(n_by_study)
-    study_names <- paste0("Study_", seq_len(S))
+    if (!is.null(tmpl_list) && length(tmpl_list) != S) {
+        stop("template has ", length(tmpl_list), " study templates but there are ", S,
+            " studies; give one template per study.", call. = FALSE)
+    }
+    if (is.list(crosstalk)) {
+        if (is.null(tmpl_list) || length(crosstalk) != S) {
+            stop("A list of crosstalk values needs one template per study and one ",
+                "value per study.", call. = FALSE)
+        }
+    }
+    study_names <- if (!is.null(tmpl_list)) names(tmpl_list) else paste0("Study_", seq_len(S))
     het <- .check_heterogeneity(list(effect.cor = effect.cor,
         support.overlap = support.overlap, intercept.sd = intercept.sd,
         snr.sd = snr.sd, shift.sd = shift.sd, batch.loc.sd = batch.loc.sd,
@@ -177,7 +211,8 @@ gen_multistudy <- function(n,
                 call. = FALSE)
         }
     }
-    setup <- .simmba_setup(template, list(...), p = p, crosstalk = crosstalk,
+    setup <- .simmba_setup(if (is.null(tmpl_list)) template else tmpl_list[[1]],
+        list(...), p = p, crosstalk = if (is.list(crosstalk)) crosstalk[[1]] else crosstalk,
         feature.select = feature.select, feature.jitter = feature.jitter,
         view.models = view.models, snr = snr, signal.prob = signal.prob,
         signal.neg.prob = signal.neg.prob, effect.meanlog = effect.meanlog,
@@ -194,6 +229,16 @@ gen_multistudy <- function(n,
         back.transform = back.transform)
     tmpl <- setup$template
     cfg <- setup$cfg
+    cfg$crosstalk <- crosstalk
+    if (!is.null(tmpl_list)) {
+        if (identical(cfg$ygen.mode, "SharedLatent") &&
+            length(unique(vapply(tmpl_list, function(t) t$shared.rank, integer(1)))) > 1L) {
+            stop("outcome.model = \"shared_latent\" with one template per study needs ",
+                "the same shared.rank in every template; fit them with a fixed ",
+                "shared.rank (e.g. fit_study_templates(x, shared.rank = 2)).", call. = FALSE)
+        }
+        tmpl <- tmpl_list
+    }
     nrep <- .check_count(nrep, "nrep", min = 1L)
 
     trainDat <- testDat <- agreement.emp <- vector("list", nrep)
@@ -240,9 +285,13 @@ gen_multistudy <- function(n,
 
     list(trainDat = trainDat, testDat = testDat,
         template = if (isTRUE(return.template)) tmpl else NULL,
-        template_provenance = tmpl$provenance, p = p, crosstalk = crosstalk,
+        template_provenance = if (is.null(tmpl_list)) tmpl$provenance else
+            lapply(tmpl_list, `[[`, "provenance"),
+        p = p, crosstalk = crosstalk,
         view.models = view.models,
-        cancor = .realized_cancor(tmpl, crosstalk),
+        cancor = if (is.null(tmpl_list)) .realized_cancor(tmpl, crosstalk) else
+            stats::setNames(lapply(seq_len(S), function(s) .realized_cancor(tmpl_list[[s]],
+                if (is.list(crosstalk)) crosstalk[[s]] else crosstalk)), study_names),
         agreement.emp = agreement.emp,
         nstudy = S, n = n_by_study, holdout.studies = holdout,
         effect.cor = effect.cor, support.overlap = support.overlap,
@@ -442,8 +491,8 @@ gen_multistudy <- function(n,
     out <- pcl
     out$sample_metadata <- pcl$sample_metadata[rows, , drop = FALSE]
     out$feature_table <- pcl$feature_table[, rows, drop = FALSE]
-    out$truth$scores <- pcl$truth$scores[rows, , drop = FALSE]
-    out$truth$shared <- pcl$truth$shared[rows, , drop = FALSE]
+    if (!is.null(pcl$truth$scores)) out$truth$scores <- pcl$truth$scores[rows, , drop = FALSE]
+    if (!is.null(pcl$truth$shared)) out$truth$shared <- pcl$truth$shared[rows, , drop = FALSE]
     out
 }
 
@@ -455,6 +504,10 @@ gen_multistudy <- function(n,
 #' `split` of every sample.
 #'
 #' @inheritParams simulate_mimesys
+#' @param template One template (or data set) for every study, or one per
+#'   study: a list of templates from [fit_study_templates()] or a list of data
+#'   sets (fitted with `fit_study_templates(template, ...)`, using
+#'   `template_args`). See [gen_multistudy()].
 #' @param n Samples per study: one value for every study (with `nstudy`) or one
 #'   value per study.
 #' @param nstudy Number of studies. Defaults to `length(n)`.
@@ -465,7 +518,9 @@ gen_multistudy <- function(n,
 #'   `batch.loc.sd`, `batch.scale.sd` and `holdout.studies` in
 #'   [gen_multistudy()]). The defaults give homogeneous studies.
 #' @param calibration Named list controlling automatic crosstalk calibration
-#'   (see [simulate_mimesys()]); calibration uses the average study size.
+#'   (see [simulate_mimesys()]). With one template, calibration uses the
+#'   average study size; with one template per study, each study's crosstalk
+#'   is calibrated on its own template and size.
 #' @param train_fraction Fraction of each non-holdout study's samples labelled
 #'   `"train"`.
 #' @param return_type `"mae"` (default) returns MAE-oriented output. Use
@@ -513,14 +568,36 @@ simulate_multistudy <- function(template,
         holdout_studies = NULL
     ), "heterogeneity")
 
-    setup <- .mimesys_wrapper_setup(template,
-        n = max(2L, as.integer(round(mean(n_by_study)))), p = p, nrep = nrep,
+    tmpl_list <- .study_template_list(template, template_args)
+    if (!is.null(tmpl_list) && is.null(nstudy) && length(n) == 1L) {
+        n_by_study <- .study_sizes(n, length(tmpl_list))
+    }
+    setup <- .mimesys_wrapper_setup(
+        if (is.null(tmpl_list)) template else tmpl_list[[1]],
+        n = if (is.null(tmpl_list)) max(2L, as.integer(round(mean(n_by_study)))) else n_by_study[1],
+        p = p, nrep = nrep,
         crosstalk = crosstalk, null_model = null_model,
         template_args = template_args, calibration = calibration, seed = seed,
         null_preset = opts$preset$null_model)
     fitted_template <- setup$template
     null_model <- setup$null_model
     resolved <- setup$crosstalk
+    if (!is.null(tmpl_list)) {
+        if (length(tmpl_list) != length(n_by_study)) {
+            stop("template has ", length(tmpl_list), " study templates but n has ",
+                length(n_by_study), " studies.", call. = FALSE)
+        }
+        ## Crosstalk resolved (calibrated) for each study's template
+        res_list <- c(list(resolved), lapply(seq_along(tmpl_list)[-1], function(s) {
+            .mimesys_resolve_crosstalk(tmpl_list[[s]], n = n_by_study[s], p = p,
+                crosstalk = crosstalk, calibration = calibration,
+                null_model = null_model, seed = seed)
+        }))
+        names(res_list) <- names(tmpl_list)
+        fitted_template <- tmpl_list
+        resolved <- list(value = lapply(res_list, `[[`, "value"),
+            calibration = lapply(res_list, `[[`, "calibration"))
+    }
     sim <- gen_multistudy(
         n = n_by_study, template = fitted_template,
         effect.cor = het$effect_cor, support.overlap = het$support_overlap,
@@ -549,10 +626,175 @@ simulate_multistudy <- function(template,
         nrep = as.integer(nrep), seed = seed
     )
     sim$crosstalk_calibration <- resolved$calibration
-    sim$provenance <- .mimesys_wrapper_provenance(fitted_template, resolved,
-        purpose = "multistudy", preset = preset, seed = seed)
+    sim$provenance <- .mimesys_wrapper_provenance(
+        if (is.null(tmpl_list)) fitted_template else list(provenance = lapply(tmpl_list, `[[`, "provenance")),
+        resolved, purpose = "multistudy", preset = preset, seed = seed)
     if (identical(return_type, "simulation")) return(sim)
 
     maes <- lapply(seq_len(sim$nrep), function(i) as_mimesys_mae(sim, rep = i))
     .mimesys_collect_maes(maes, .mimesys_simulation_settings(sim))
+}
+
+#' Fit one template per study on common views and features
+#'
+#' Fits a [fit_template()] template to each study's data, restricted to the
+#' views and features that every study has, so the templates can be used
+#' together in [gen_multistudy()] and [simulate_multistudy()] (one template
+#' per study). Features that a fit drops in any study (all missing, or
+#' constant) are removed from every study and the templates are refitted, so
+#' all templates end up with the same features in the same order.
+#'
+#' @param x A list with one data set per study: `MultiAssayExperiment`s,
+#'   `SummarizedExperiment`s or named lists of sample x feature matrices (see
+#'   [as_mimesys_view_list()]). Names, if given, label the studies.
+#' @param ... Passed to [fit_template()] for every study (for example
+#'   `view.transform`, `rank` or `shared.rank`).
+#' @param min.features Smallest number of common features a view must keep.
+#'
+#' @return A `mimesys_template_list`: a named list of `mimesys_template`s with
+#'   identical views and features.
+#' @examples
+#' data(stelzer_mae)
+#' ## Two "cohorts" from one data set, for illustration
+#' half <- split(colnames(stelzer_mae[[1]]), rep(1:2, length.out = ncol(stelzer_mae[[1]])))
+#' cohorts <- lapply(half, function(ids) stelzer_mae[, ids])
+#' tmpls <- fit_study_templates(cohorts, shared.rank = 1)
+#' tmpls
+#' sim <- gen_multistudy(n = c(30, 30), template = tmpls, p = 10, seed = 1)
+#' table(sim$trainDat$Rep_1$sample_metadata$study)
+#' @export
+fit_study_templates <- function(x, ..., min.features = 2L) {
+    if (!is.list(x) || inherits(x, "mimesys_template") || length(x) < 2L) {
+        stop("x must be a list with one data set per study (at least two).",
+            call. = FALSE)
+    }
+    min.features <- .check_count(min.features, "min.features", min = 1L)
+    study_names <- names(x)
+    if (is.null(study_names) || any(!nzchar(study_names)) || anyDuplicated(study_names)) {
+        study_names <- paste0("Study_", seq_along(x))
+    }
+    view_lists <- lapply(x, as_mimesys_view_list)
+    views <- Reduce(intersect, lapply(view_lists, names))
+    if (length(views) == 0L) {
+        stop("The studies have no view in common (views are matched by name).",
+            call. = FALSE)
+    }
+    all_views <- unique(unlist(lapply(view_lists, names)))
+    if (length(all_views) > length(views)) {
+        message("Using the views common to every study: ", paste(views, collapse = ", "),
+            "; dropped: ", paste(setdiff(all_views, views), collapse = ", "), ".")
+    }
+    usable <- function(X) {
+        X <- as.matrix(X)
+        colnames(X)[apply(X, 2, function(col) {
+            col <- col[is.finite(col)]
+            length(col) > 0L && length(unique(col)) > 1L
+        })]
+    }
+    features <- stats::setNames(lapply(views, function(v) {
+        Reduce(intersect, lapply(view_lists, function(l) usable(l[[v]])))
+    }), views)
+    for (pass in seq_len(5L)) {
+        short <- views[lengths(features) < min.features]
+        if (length(short) > 0L) {
+            stop("Too few features common to every study in view(s) ",
+                paste(short, collapse = ", "), " (need ", min.features,
+                "). Check that feature names match across studies.", call. = FALSE)
+        }
+        fits <- lapply(view_lists, function(l) {
+            fit_template(lapply(stats::setNames(views, views), function(v) {
+                l[[v]][, features[[v]], drop = FALSE]
+            }), ...)
+        })
+        kept <- stats::setNames(lapply(views, function(v) {
+            Reduce(intersect, lapply(fits, function(f) colnames(f$fits[[v]]$qmat)))
+        }), views)
+        if (identical(kept, features)) break
+        features <- kept
+        if (pass == 5L) {
+            stop("Could not find features kept by every study's template.", call. = FALSE)
+        }
+    }
+    dropped <- sum(vapply(views, function(v) {
+        length(unique(unlist(lapply(view_lists, function(l) colnames(l[[v]]))))) -
+            length(features[[v]])
+    }, numeric(1)))
+    if (dropped > 0) {
+        message("Kept ", sum(lengths(features)), " features common to every study (",
+            paste(sprintf("%s: %d", views, lengths(features)), collapse = ", "),
+            "); dropped ", dropped, ".")
+    }
+    names(fits) <- study_names
+    structure(fits, class = c("mimesys_template_list", "list"))
+}
+
+#' @export
+print.mimesys_template_list <- function(x, ...) {
+    first <- x[[1]]
+    cat("MimeSys templates for", length(x), "studies\n")
+    cat("  Views (features): ", paste(sprintf("%s (%d)", first$views,
+        vapply(first$fits, function(f) ncol(f$qmat), integer(1))), collapse = ", "),
+        "\n", sep = "")
+    for (s in names(x)) {
+        cat("  ", s, ": ", x[[s]]$n0, " samples, shared rank ", x[[s]]$shared.rank,
+            ", view ranks ", paste(vapply(x[[s]]$fits, function(f) f$rank, integer(1)),
+                collapse = "/"), "\n", sep = "")
+    }
+    invisible(x)
+}
+
+## The per-study templates in `template`, or NULL for a single template.
+## Raw data sets (one per study) are fitted with fit_study_templates().
+.study_template_list <- function(template, fit_args = list()) {
+    if (inherits(template, "mimesys_template") ||
+        inherits(template, "MultiAssayExperiment") ||
+        inherits(template, "SummarizedExperiment") || !is.list(template) ||
+        length(template) == 0L) {
+        return(NULL)
+    }
+    is_tmpl <- vapply(template, inherits, logical(1), "mimesys_template")
+    is_data <- vapply(template, function(e) {
+        inherits(e, "MultiAssayExperiment") || inherits(e, "SummarizedExperiment") ||
+            (is.list(e) && !is.data.frame(e))
+    }, logical(1))
+    if (all(is_tmpl)) {
+        tl <- template
+    } else if (all(is_data)) {
+        tl <- do.call(fit_study_templates, c(list(template), fit_args))
+    } else if (any(is_tmpl) || any(is_data)) {
+        stop("template must be one template (or data set) for every study, or a ",
+            "list with one template (or data set) per study.", call. = FALSE)
+    } else {
+        return(NULL)   # a named list of matrices: one data set
+    }
+    if (is.null(names(tl)) || any(!nzchar(names(tl))) || anyDuplicated(names(tl))) {
+        names(tl) <- paste0("Study_", seq_along(tl))
+    }
+    .check_study_templates(tl)
+    tl
+}
+
+.check_study_templates <- function(tl) {
+    ref <- tl[[1]]
+    for (s in seq_along(tl)[-1]) {
+        t <- tl[[s]]
+        if (!identical(t$views, ref$views)) {
+            stop("Study templates must have the same views in the same order; ",
+                names(tl)[s], " differs. Use fit_study_templates().", call. = FALSE)
+        }
+        same_features <- vapply(seq_along(ref$views), function(m) {
+            identical(colnames(t$fits[[m]]$qmat), colnames(ref$fits[[m]]$qmat))
+        }, logical(1))
+        if (!all(same_features)) {
+            stop("Study templates must have the same features in every view; ",
+                names(tl)[s], " differs in ", paste(ref$views[!same_features],
+                    collapse = ", "), ". Use fit_study_templates().", call. = FALSE)
+        }
+        vt <- function(x) if (is.null(x$view.transform)) "none" else x$view.transform
+        if (!identical(vt(t), vt(ref))) {
+            stop("Study templates must use the same view.transform; ", names(tl)[s],
+                " differs.", call. = FALSE)
+        }
+    }
+    invisible(TRUE)
 }

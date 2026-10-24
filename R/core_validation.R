@@ -546,7 +546,9 @@ compare_blockwise_correlation_summary <- function(
 #' Correlates the vector of observed feature-feature correlations with the
 #' matching vector of simulated feature-feature correlations within each view
 #' block. This asks whether the simulated data preserve the pattern of the
-#' correlation matrix, not only its average magnitude.
+#' correlation matrix, not only its average magnitude. Each pair of distinct
+#' features is counted once: self-correlations are left out, and each
+#' cross-view block appears once (views in alphabetical order).
 #'
 #' @param observed_corr,simulated_corr Data frames returned by
 #'   `blockwise_feature_correlation()` for observed and simulated matrices.
@@ -575,8 +577,17 @@ compare_feature_correlation_structure <- function(observed_corr, simulated_corr,
         stop("observed_corr and simulated_corr must come from blockwise_feature_correlation().",
             call. = FALSE)
     }
-    obs <- observed_corr[, needed, drop = FALSE]
-    sim <- simulated_corr[, needed, drop = FALSE]
+    ## Each feature pair once: drop self-correlations and keep one orientation
+    ## of every pair (blockwise_feature_correlation() lists both), chosen by
+    ## view and feature name so that the two tables agree
+    one_orientation <- function(x) {
+        vx <- as.character(x$view_x); vy <- as.character(x$view_y)
+        fx <- as.character(x$feature_x); fy <- as.character(x$feature_y)
+        keep <- (vx < vy) | (vx == vy & fx < fy)
+        x[keep, needed, drop = FALSE]
+    }
+    obs <- one_orientation(observed_corr)
+    sim <- one_orientation(simulated_corr)
     names(obs)[names(obs) == "correlation"] <- "observed"
     names(sim)[names(sim) == "correlation"] <- "simulated"
     pairs <- merge(obs, sim, by = key_cols, all = FALSE)

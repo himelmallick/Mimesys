@@ -72,6 +72,22 @@ as_mimesys_view_list <- function(x, assay = NULL, single_view_name = "view1") {
         .mimesys_one_view_matrix(x[[i]], assay = assay, view = view)
     })
     names(out) <- make.unique(names(x), sep = "_")
+    ## Views without sample IDs are matched by position, which is only
+    ## possible when every view has the same number of samples
+    generated <- vapply(out, function(m) isTRUE(attr(m, "mimesys_generated_ids")),
+        logical(1))
+    out <- lapply(out, function(m) {
+        attr(m, "mimesys_generated_ids") <- NULL
+        m
+    })
+    sizes <- vapply(out, nrow, integer(1))
+    if (any(generated) && length(unique(sizes)) > 1L) {
+        stop("View(s) ", paste(names(out)[generated], collapse = ", "),
+            " have no sample IDs (row names), and the views have different numbers ",
+            "of samples (", paste(sprintf("%s: %d", names(out), sizes), collapse = ", "),
+            "), so samples cannot be matched across views. Add sample IDs as row ",
+            "names (or use a MultiAssayExperiment).", call. = FALSE)
+    }
     out
 }
 
@@ -109,6 +125,7 @@ as_mimesys_view_list <- function(x, assay = NULL, single_view_name = "view1") {
     }
     if (is.null(rownames(mat))) {
         rownames(mat) <- paste0("sample_", seq_len(nrow(mat)))
+        attr(mat, "mimesys_generated_ids") <- TRUE
     }
     if (is.null(colnames(mat))) {
         colnames(mat) <- paste0(view, "_feature_", seq_len(ncol(mat)))

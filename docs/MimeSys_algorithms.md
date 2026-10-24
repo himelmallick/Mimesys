@@ -3,8 +3,8 @@
 This document describes, with the mathematics, every algorithm in MimeSys
 (version 0.99.0): how the template is fitted, how null multi-omics data are
 generated, how outcome signal is planted, how crosstalk is calibrated and the
-template validated, and how parallel and sequential mediation are simulated
-with exact causal truth. Each section states what the code does, the model
+template validated, how several heterogeneous studies are simulated, and how
+parallel and sequential mediation are simulated with exact causal truth. Each section states what the code does, the model
 behind it, and why it is built that way.
 
 The main separation is:
@@ -17,6 +17,9 @@ The main separation is:
 - **Mediation generation** lets an exposure act on chosen features *before*
   they are mapped to the data scale, and then generates an outcome from them
   (`gen_mediation()`).
+- **Multi-study generation** simulates several studies on the same features,
+  from one template or one template per cohort, with controlled case-mix,
+  batch, coefficient, intercept and SNR differences (`gen_multistudy()`).
 
 Crosstalk controls only cross-view feature dependence; the outcome model
 controls what predicts the outcome. High crosstalk does not by itself make
@@ -67,9 +70,10 @@ error). The samples used are the intersection of the sample IDs of all views:
 $$\mathcal{I} = \bigcap_{m=1}^{M} \mathrm{rownames}(X_m), \qquad n_0 = \lvert\mathcal{I}\rvert \ge 10 .$$
 
 Duplicate IDs within a view are an error. A list of matrices without row names
-is matched by position (all views receive `sample_1, ...`); if such views have
-different numbers of rows, only the first $\min_m n_m$ rows are kept, so give
-matrices explicit sample IDs.
+is matched by position (all views receive `sample_1, ...`), which requires every
+view to have the same number of rows; views without sample IDs and with
+different numbers of rows are an error. Give matrices explicit sample IDs
+whenever the order is not guaranteed to match.
 
 The template assumes **one sample per subject**. Repeated measures are not
 independent and inflate the estimated cross-view structure: all 150 samples of
@@ -929,10 +933,109 @@ different question:
   microbiome about half of the chain was attributed to the direct path.
   Transforming such features (ranks, log ratios) helps.
 
-## 9. MAE wrappers and reproducibility
+## 9. Multi-study simulation (`gen_multistudy()`)
 
-`simulate_mimesys()`, `simulate_mimesys_null()` and `simulate_mediation()`
-fit the template if needed, calibrate crosstalk by default
+`gen_multistudy()` simulates $S$ studies that measure the same simulated
+features, from one template or from one template per study (one real cohort
+each, fitted together with `fit_study_templates()`). With one study and no
+heterogeneity it gives the same features, coefficients and outcome as
+`gen_simmba()` with the same seed; both run on one outcome engine.
+
+| Heterogeneity | Model | Argument |
+|---|---|---|
+| Case mix | shift of the study's latent factor means; enters the outcome | `shift.sd` |
+| Batch | $z \to a + b z$ on each feature's latent score; does not enter the outcome | `batch.loc.sd`, `batch.scale.sd` |
+| Signal features | fraction of each study's signal features from the common set | `support.overlap` |
+| Effect sizes | correlation of the common features' effects between studies | `effect.cor` |
+| Baseline and noise | study intercept and log-SNR spread | `intercept.sd`, `snr.sd` |
+
+### 9.1 Features of every study
+
+Study 1 chooses the simulated features; the other studies reuse them. With one
+template per study, the choice is carried to each template by feature name
+(the same parents, and for offspring the same parent and partner features with
+that template's loadings), so every study keeps its own cohort's marginals and
+correlation structure. `fit_study_templates()` keeps the views and features
+that every cohort has, drops features that are missing or constant in any
+cohort, and refits until all templates have identical features.
+
+**Case mix.** The factor scores of view $m$ are
+$F_m = \sqrt{\gamma_m}\,S B_m^\top + E_m R_m$ with
+$R_m = (I - \gamma_m B_m B_m^\top)^{1/2}$. Study $s$ shifts the shared variates
+by $\delta^{\mathrm{sh}}_s$ and the view innovations by $\delta^{E}_{s,m}$, all
+$N(0, \sigma^2_{\mathrm{shift}})$, so the scores move by
+$$d_{s,m} = \sqrt{\gamma_m}\,B_m\,\delta^{\mathrm{sh}}_s + R_m\,\delta^{E}_{s,m}, \qquad \operatorname{Cov}(d_{s,m}) = \sigma^2_{\mathrm{shift}} I,$$
+and the latent feature scores by $\Lambda_m d_{s,m}$. The shift is biology: it
+is part of the latent truth and moves the outcome.
+
+**Batch.** For study $s$ and feature $j$,
+$$z_{ij} \to a_{sj} + b_{sj}\,z_{ij}, \qquad a_{sj} \sim N(0, \sigma_a^2), \quad \log b_{sj} \sim N(0, \sigma_b^2),$$
+before the template marginal, so values stay in the observed support (zeros
+included; in two-part views presence probabilities change too). The engine
+maps both the batch-free and the batch-affected latent scores; the outcome is
+built from the batch-free features, so batch effects are pure technical noise.
+
+### 9.2 Study coefficients
+
+From the common coefficients $\beta$ (Section 5.2), study $s$ keeps a random
+$\operatorname{round}(\omega k_m)$ of the $k_m$ common signal features of view
+$m$ ($\omega$ = `support.overlap`) and draws the rest from the other features
+of the view, following `signal.align`. Two studies then share about
+$\omega^2 k_m$ common features, a Jaccard overlap of about
+$\omega^2/(2 - \omega^2)$. For a kept feature,
+$$\beta_{sj} = \mu + \sqrt{\rho}\,(\beta_j - \mu) + \sqrt{1-\rho}\,(\beta^\ast_{sj} - \mu),$$
+with $\rho$ = `effect.cor`, $\beta^\ast_{sj}$ a fresh draw from the effect-size
+distribution and $\mu = (1 - 2q)\,\mathbb{E}\lvert L\rvert$ its mean
+($q$ = `signal.neg.prob`, $L = \log_2 f$ normal, so $\mathbb{E}\lvert L\rvert$ is
+a folded-normal mean). Then $\mathbb{E}\beta_{sj} = \mu$,
+$\operatorname{Var}\beta_{sj} = \operatorname{Var}\beta_j$ and
+$\operatorname{Cor}(\beta_{sj}, \beta_{tj}) = \rho$.
+
+### 9.3 Predictor and outcome
+
+Features are standardized over all studies (within-study standardization would
+erase the study differences). Study $s$'s linear predictor uses $\beta_s$;
+Friedman features, interaction pairs and shared-latent factors are common to
+all studies; `signal.share` rescales each view by one factor for all studies.
+With $V$ the pooled within-study variance of $\eta$, $\alpha_s \sim
+N(0,\sigma_\alpha^2)$ and $\mathrm{SNR}_s = \mathrm{snr}\cdot e^{\epsilon_s}$,
+$\epsilon_s \sim N(0, \sigma^2_{\mathrm{snr}})$:
+
+- continuous: $Y = \eta + \alpha_s\sqrt V + \varepsilon$,
+  $\varepsilon \sim N(0, V/\mathrm{SNR}_s)$;
+- binary: $\operatorname{logit} P(Y = 1) = c + \alpha_s + \sqrt{\mathrm{SNR}_s\,\pi^2/3}\,(\eta - \bar\eta)/\sqrt V$,
+  with $c$ solved so the pooled prevalence is `binary.prevalence`;
+- survival: hazard $h_0\exp\{\alpha_s + \sqrt{\mathrm{SNR}_s\,\pi^2/6}\,(\eta - \bar\eta)/\sqrt V\}$,
+  censoring solved within each study.
+
+Studies in `holdout.studies` go entirely to the test set; the others are
+split by `train.fraction`.
+
+### 9.4 Random streams
+
+Heterogeneity is drawn from side streams: a seed derived from the current
+random state plus a tag, without advancing the main stream. With the same
+seed, the base data, common coefficients and noise are therefore identical at
+every heterogeneity level, and batch effects leave the outcome exactly
+unchanged.
+
+### 9.5 Validation
+
+Sweeps with 30 replicates per value (Stelzer and Franzosa as single templates;
+PRISM, Validation and Lloyd-Price baseline from HuMMANet as per-study
+templates): the realized coefficient correlation follows `effect.cor` (0.47 to
+0.51 at 0.5); cross-study prediction $R^2$ rises from about 0.06 to
+0.31--0.54 while within-study prediction stays flat; the share of feature
+variance explained by study rises monotonically with `shift.sd` and
+`batch.loc.sd`; within-study correlations change by less than
+replicate-to-replicate noise; the outcome is unchanged by batch. On sparse
+microbiome templates, keep `shift.sd` and the batch SDs at about 0.5 or below:
+larger values make rare taxa constant within a study.
+
+## 10. MAE wrappers and reproducibility
+
+`simulate_mimesys()`, `simulate_mimesys_null()`, `simulate_multistudy()` and
+`simulate_mediation()` fit the template if needed, calibrate crosstalk by default
 (`crosstalk = "calibrate"`; skipped for a single view, no shared factors, or
 fewer than two features per view), call the simulators, and return one
 `MultiAssayExperiment` per replicate: assay `simulated`, feature truth in
@@ -945,7 +1048,7 @@ current stream. Calibration inside the wrappers uses seed + 1, so its
 replicates never share random numbers with the simulation, and internal loops
 call unseeded engines so replicates are independent.
 
-## 10. Worked example: the Stelzer template
+## 11. Worked example: the Stelzer template
 
 `fit_template(stelzer_mae, view.transform = c(Metabolomics = "log1p", Proteomics = "log1p"))`
 (53 subjects, 40 features in each of CYTOF, Metabolomics and Proteomics):
@@ -985,7 +1088,7 @@ sim <- gen_simmba(
 Five shared factors are fitted and all five drive the outcome (linear plus
 nonlinear parts), and crosstalk sets how visible they are in each view.
 
-## 11. Default settings
+## 12. Default settings
 
 | Function | Main defaults |
 |---|---|
@@ -993,9 +1096,10 @@ nonlinear parts), and crosstalk sets how visible they are in each view.
 | `sim_from_template()` | `crosstalk = 1`, `feature.select = "random"`, `feature.jitter = 0.2`, `back.transform = FALSE` |
 | `gen_simmba()` | `signal.prob = 0.1`, `signal.neg.prob = 0.5`, `effect.meanlog = 1`, `effect.sdlog = 0.4`, `outcome.model = "linear"`, `outcome.type = "continuous"`, `snr = 1`, `binary.prevalence = 0.5`, `nonlinear.weight = interaction.weight = 0.5`, `train.fraction = 0.7`, `nrep = 1` |
 | `calibrate_crosstalk()` | `crosstalk.grid = seq(0, 1, 0.25)`, `nrep = 5`, `n` $= n_0$ |
+| `gen_multistudy()` | `effect.cor = 1`, `support.overlap = 1`, `intercept.sd = snr.sd = shift.sd = batch.loc.sd = batch.scale.sd = 0`, `holdout.studies = NULL`; other defaults as `gen_simmba()` |
 | `gen_mediation()` | `n.mediators = 5`, `TIE = 1`, `DE = 0`, `exposure.type = "binary"`, `exposure.prevalence = 0.5`, `n.mc = 5000`, `min.variability = 0.2`, `stage.links`: density 0.3, strength 0.3 |
 
-## 12. Assumptions and limitations
+## 13. Assumptions and limitations
 
 - Dependence is a Gaussian copula: linear on the latent scale; nonlinear and
   tail dependence are not reproduced.
@@ -1009,7 +1113,10 @@ nonlinear parts), and crosstalk sets how visible they are in each view.
 - Planted outcomes are controlled experiments, not imitations of the real
   outcome mechanism.
 - Mediation does not include confounders, survival outcomes or count data with
-  library sizes.
+  library sizes, and simulates one study.
+- In multi-study simulation, case-mix and batch shifts act on the latent scale,
+  so on sparse features they also change spread and zero fractions; with
+  per-study templates of different ranks the latent truth is not returned.
 
 ## References
 

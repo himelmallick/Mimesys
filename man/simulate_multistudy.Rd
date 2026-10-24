@@ -24,8 +24,10 @@ simulate_multistudy(
 )
 }
 \arguments{
-\item{template}{A \code{MultiAssayExperiment}, a \code{SummarizedExperiment}, a named
-list of matrices, or a fitted \code{mimesys_template}.}
+\item{template}{One template (or data set) for every study, or one per
+study: a list of templates from \code{\link[=fit_study_templates]{fit_study_templates()}} or a list of data
+sets (fitted with \code{fit_study_templates(template, ...)}, using
+\code{template_args}). See \code{\link[=gen_multistudy]{gen_multistudy()}}.}
 
 \item{n}{Samples per study: one value for every study (with \code{nstudy}) or one
 value per study.}
@@ -75,7 +77,9 @@ scale, see \code{\link[=sim_from_template]{sim_from_template()}}).}
 \code{template} is not already fitted.}
 
 \item{calibration}{Named list controlling automatic crosstalk calibration
-(see \code{\link[=simulate_mimesys]{simulate_mimesys()}}); calibration uses the average study size.}
+(see \code{\link[=simulate_mimesys]{simulate_mimesys()}}). With one template, calibration uses the
+average study size; with one template per study, each study's crosstalk
+is calibrated on its own template and size.}
 
 \item{train_fraction}{Fraction of each non-holdout study's samples labelled
 \code{"train"}.}

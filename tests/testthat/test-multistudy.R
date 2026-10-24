@@ -251,3 +251,91 @@ test_that("gen_multistudy() validates its arguments", {
     expect_error(gen_multistudy(n = 20, nstudy = 2, template = tm, p = 5,
         train.fraction = 1), "holdout.studies")
 })
+
+## ---- one template per study ---------------------------------------------
+
+ms_cohorts <- function() {
+    data(stelzer_mae, package = "MimeSys", envir = environment())
+    ids <- colnames(stelzer_mae[[1]])
+    half <- split(ids, rep(1:2, length.out = length(ids)))
+    stats::setNames(lapply(half, function(i) stelzer_mae[, i]), c("CohortA", "CohortB"))
+}
+
+test_that("fit_study_templates() gives templates with identical features", {
+    co <- ms_cohorts()
+    ## Make one feature constant in one cohort: it must be dropped everywhere
+    a1 <- SummarizedExperiment::assay(co$CohortA[["CYTOF"]])
+    drop_name <- rownames(a1)[1]
+    co$CohortA <- MultiAssayExperiment::`experiments<-`(co$CohortA, local({
+        ex <- MultiAssayExperiment::experiments(co$CohortA)
+        a <- SummarizedExperiment::assay(ex[["CYTOF"]])
+        a[1, ] <- 1
+        SummarizedExperiment::assay(ex[["CYTOF"]]) <- a
+        ex
+    }))
+    tl <- suppressMessages(fit_study_templates(co, shared.rank = 1))
+    expect_s3_class(tl, "mimesys_template_list")
+    expect_named(tl, c("CohortA", "CohortB"))
+    for (m in seq_along(tl$CohortA$views)) {
+        expect_identical(colnames(tl$CohortA$fits[[m]]$qmat),
+            colnames(tl$CohortB$fits[[m]]$qmat))
+    }
+    expect_false(drop_name %in% colnames(tl$CohortB$fits[["CYTOF"]]$qmat))
+    expect_output(print(tl), "templates for 2 studies")
+    expect_error(fit_study_templates(list(co$CohortA)), "at least two")
+})
+
+test_that("per-study templates simulate the same features with cohort differences", {
+    tm <- ms_template()
+    ## The same template given per study reproduces the single-template run
+    s1 <- gen_multistudy(n = c(40, 50), template = tm, p = 70, effect.cor = 0.5, seed = 5)
+    s2 <- gen_multistudy(n = c(40, 50), template = list(tm, tm), p = 70,
+        effect.cor = 0.5, seed = 5)
+    expect_identical(s1$trainDat$Rep_1$feature_table, s2$trainDat$Rep_1$feature_table)
+    expect_identical(s1$testDat$Rep_1$sample_metadata, s2$testDat$Rep_1$sample_metadata)
+
+    tl <- suppressWarnings(fit_study_templates(ms_cohorts(), shared.rank = 1))
+    x <- gen_multistudy(n = c(300, 300), template = tl, p = 40, seed = 2)
+    d <- x$trainDat$Rep_1
+    expect_setequal(unique(d$sample_metadata$study), c("CohortA", "CohortB"))
+    expect_named(d$truth$crosstalk, c("CohortA", "CohortB"))
+    X <- rbind(t(as.matrix(d$feature_table)), t(as.matrix(x$testDat$Rep_1$feature_table)))
+    st <- c(d$sample_metadata$study, x$testDat$Rep_1$sample_metadata$study)
+    y <- gen_multistudy(n = c(300, 300), template = tl$CohortA, p = 40, seed = 2)
+    Y <- rbind(t(as.matrix(y$trainDat$Rep_1$feature_table)),
+        t(as.matrix(y$testDat$Rep_1$feature_table)))
+    sy <- c(y$trainDat$Rep_1$sample_metadata$study, y$testDat$Rep_1$sample_metadata$study)
+    md <- function(X, st) {
+        u <- unique(st)
+        mean(abs(colMeans(X[st == u[1], ]) - colMeans(X[st == u[2], ])) / apply(X, 2, stats::sd))
+    }
+    expect_gt(md(X, st), 2 * md(Y, sy))
+
+    ## Ranks differ between the cohort templates: no pooled latent scores
+    expect_null(d$truth$scores)
+    ## Offspring features, survival, per-study crosstalk, raw data input
+    z <- gen_multistudy(n = 30, template = ms_cohorts(), p = 60,
+        crosstalk = list(0.5, 1), outcome.type = "survival", shared.rank = 1, seed = 1)
+    expect_equal(unname(z$trainDat$Rep_1$truth$crosstalk$CohortA[1]), 0.5)
+    expect_equal(nrow(z$trainDat$Rep_1$feature_table), 180)
+})
+
+test_that("per-study templates are checked for compatibility", {
+    tm <- ms_template()
+    data(stelzer_mae, package = "MimeSys", envir = environment())
+    other <- fit_template(stelzer_mae[1:20, ], shared.rank = 1, seed = 1)
+    expect_error(gen_multistudy(n = 20, template = list(tm, other), p = 5),
+        "same features")
+    expect_error(gen_multistudy(n = c(20, 20, 20), template = list(tm, tm), p = 5),
+        "one template per study")
+    expect_error(gen_multistudy(n = 20, template = tm, nstudy = 2, p = 5,
+        crosstalk = list(1, 1)), "one template per study")
+    tl <- suppressWarnings(fit_study_templates(ms_cohorts()))
+    if (length(unique(vapply(tl, `[[`, integer(1), "shared.rank"))) > 1L) {
+        expect_error(gen_multistudy(n = 20, template = tl, p = 5,
+            outcome.model = "shared_latent"), "same shared.rank")
+    }
+    mae <- simulate_multistudy(suppressWarnings(fit_study_templates(ms_cohorts(),
+        shared.rank = 1)), n = c(25, 30), p = 8, crosstalk = 1, seed = 1)
+    expect_equal(as.vector(table(MultiAssayExperiment::colData(mae)$study)), c(25, 30))
+})

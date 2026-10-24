@@ -1,0 +1,215 @@
+"experiment","metric","level","mean","se"
+"A. effect.cor","coef_cor",0,0.040304837508024,0.0241024862849104
+"A. effect.cor","coef_cor",0.1,0.133347464852737,0.0284429291274375
+"A. effect.cor","coef_cor",0.2,0.226022866675829,0.0292213293129364
+"A. effect.cor","coef_cor",0.3,0.320410355201832,0.0282510176346643
+"A. effect.cor","coef_cor",0.4,0.416359366883741,0.0260352526758486
+"A. effect.cor","coef_cor",0.5,0.5134869043234,0.022884364885146
+"A. effect.cor","coef_cor",0.6,0.611338684542358,0.019013994450968
+"A. effect.cor","coef_cor",0.7,0.709442219563263,0.0145931040242402
+"A. effect.cor","coef_cor",0.8,0.807305546325255,0.00978668693052429
+"A. effect.cor","coef_cor",0.9,0.904383287379291,0.00480310253756205
+"A. effect.cor","coef_cor",1,1,1.50560342775565e-17
+"A. effect.cor","predictor_cor",0,0.0371974150283017,0.0492481656559941
+"A. effect.cor","predictor_cor",0.1,0.104712063733444,0.0454191797316517
+"A. effect.cor","predictor_cor",0.2,0.187787514443252,0.0438287844493404
+"A. effect.cor","predictor_cor",0.3,0.277099786157825,0.042390375540425
+"A. effect.cor","predictor_cor",0.4,0.371041882499316,0.0408626063994313
+"A. effect.cor","predictor_cor",0.5,0.468373691817396,0.0387128372640273
+"A. effect.cor","predictor_cor",0.6,0.568702550358724,0.0352385820362
+"A. effect.cor","predictor_cor",0.7,0.672365520391552,0.0298345638987526
+"A. effect.cor","predictor_cor",0.8,0.779729258155801,0.0221085357569493
+"A. effect.cor","predictor_cor",0.9,0.889791328926442,0.0121156074971597
+"A. effect.cor","predictor_cor",1,1,1.35713258982184e-17
+"A. effect.cor","transfer_R2",0,0.0553671264532548,0.00945519204280976
+"A. effect.cor","transfer_R2",0.1,0.0486394825511883,0.00831495395634227
+"A. effect.cor","transfer_R2",0.2,0.073401764882837,0.0128446944107143
+"A. effect.cor","transfer_R2",0.3,0.0789600535251302,0.0131961053305753
+"A. effect.cor","transfer_R2",0.4,0.115682331823906,0.0206163853615267
+"A. effect.cor","transfer_R2",0.5,0.116872165796463,0.0175540844868134
+"A. effect.cor","transfer_R2",0.6,0.144241078886844,0.0185490295202169
+"A. effect.cor","transfer_R2",0.7,0.180830593905577,0.0221784239140715
+"A. effect.cor","transfer_R2",0.8,0.219029513800175,0.0214171430031689
+"A. effect.cor","transfer_R2",0.9,0.259924180318765,0.0196309113089129
+"A. effect.cor","transfer_R2",1,0.30550407414216,0.0208386860840455
+"A. effect.cor","within_R2",0,0.437160185497627,0.0303336052149166
+"A. effect.cor","within_R2",0.1,0.394196997686455,0.0291866681304075
+"A. effect.cor","within_R2",0.2,0.407760540072147,0.0313587657548442
+"A. effect.cor","within_R2",0.3,0.404791050562031,0.0288348772927882
+"A. effect.cor","within_R2",0.4,0.425875563958427,0.0271081058863076
+"A. effect.cor","within_R2",0.5,0.419400243847184,0.0288364062063091
+"A. effect.cor","within_R2",0.6,0.417595378295971,0.0300908936859181
+"A. effect.cor","within_R2",0.7,0.413557438445997,0.0338610061037746
+"A. effect.cor","within_R2",0.8,0.42881951420333,0.0283810326804301
+"A. effect.cor","within_R2",0.9,0.417970908956681,0.0275067418556731
+"A. effect.cor","within_R2",1,0.432061840504316,0.0313203390661265
+"B. support.overlap","predictor_cor",0,0.0469338076874025,0.0399338900935568
+"B. support.overlap","predictor_cor",0.1,0.0329005349222672,0.0408045536359628
+"B. support.overlap","predictor_cor",0.2,0.0944758487420422,0.0403615101847572
+"B. support.overlap","predictor_cor",0.3,0.10869259442144,0.0473527150427068
+"B. support.overlap","predictor_cor",0.4,0.187035081890688,0.0514716251814683
+"B. support.overlap","predictor_cor",0.5,0.226935702204524,0.0524078214190625
+"B. support.overlap","predictor_cor",0.6,0.378412344108867,0.0492926139296562
+"B. support.overlap","predictor_cor",0.7,0.513592698996319,0.0478450874796867
+"B. support.overlap","predictor_cor",0.8,0.611666087083188,0.0384740111139494
+"B. support.overlap","predictor_cor",0.9,0.760348254036933,0.0292313804385514
+"B. support.overlap","predictor_cor",1,1,1.35713258982184e-17
+"B. support.overlap","support_jaccard",0,0.0639705748501524,0.00544625698545673
+"B. support.overlap","support_jaccard",0.1,0.0597390551322892,0.00437918075360638
+"B. support.overlap","support_jaccard",0.2,0.0622721561424219,0.00553482776706996
+"B. support.overlap","support_jaccard",0.3,0.0763029530865366,0.00486760855909766
+"B. support.overlap","support_jaccard",0.4,0.113418203619864,0.00731665254673089
+"B. support.overlap","support_jaccard",0.5,0.162889574454885,0.00623934147475384
+"B. support.overlap","support_jaccard",0.6,0.244650719366826,0.00724217889036228
+"B. support.overlap","support_jaccard",0.7,0.333935453956992,0.00749871286519449
+"B. support.overlap","support_jaccard",0.8,0.474053967843534,0.00815711218932497
+"B. support.overlap","support_jaccard",0.9,0.676404539801488,0.0118120083934192
+"B. support.overlap","support_jaccard",1,1,0
+"B. support.overlap","transfer_R2",0,0.020799238715929,0.00277184470504183
+"B. support.overlap","transfer_R2",0.1,0.0245431798593584,0.00685981616585776
+"B. support.overlap","transfer_R2",0.2,0.0180371302029662,0.00407244488684757
+"B. support.overlap","transfer_R2",0.3,0.021391825951772,0.00578117351329266
+"B. support.overlap","transfer_R2",0.4,0.0443237341562628,0.00977712995971025
+"B. support.overlap","transfer_R2",0.5,0.0534562352391447,0.010636724858432
+"B. support.overlap","transfer_R2",0.6,0.0854501103214155,0.0133715221659005
+"B. support.overlap","transfer_R2",0.7,0.105727056043463,0.0123366898852693
+"B. support.overlap","transfer_R2",0.8,0.157621114504425,0.0152574592964527
+"B. support.overlap","transfer_R2",0.9,0.213287053250275,0.0162134759792754
+"B. support.overlap","transfer_R2",1,0.331585345766594,0.0182957178471727
+"B. support.overlap","within_R2",0,0.422257493136758,0.0364335855168279
+"B. support.overlap","within_R2",0.1,0.487161260137621,0.0286828257724089
+"B. support.overlap","within_R2",0.2,0.461808000937244,0.0324779367371612
+"B. support.overlap","within_R2",0.3,0.482042525696531,0.0311740952094159
+"B. support.overlap","within_R2",0.4,0.498095433239892,0.0281932056895061
+"B. support.overlap","within_R2",0.5,0.444019004706836,0.0351516044845193
+"B. support.overlap","within_R2",0.6,0.486054135594894,0.0274790496317671
+"B. support.overlap","within_R2",0.7,0.488351562607188,0.0276284286921908
+"B. support.overlap","within_R2",0.8,0.473064752915662,0.0285381745939321
+"B. support.overlap","within_R2",0.9,0.464916958342531,0.0337367639955432
+"B. support.overlap","within_R2",1,0.440588773442722,0.0353281655697038
+"C. shift.sd (case mix)","constant_features",0,0,0
+"C. shift.sd (case mix)","constant_features",0.25,0,0
+"C. shift.sd (case mix)","constant_features",0.5,0.0333333333333333,0.0333333333333333
+"C. shift.sd (case mix)","constant_features",0.75,0.766666666666667,0.170754467357681
+"C. shift.sd (case mix)","constant_features",1,2.86666666666667,0.379755920805684
+"C. shift.sd (case mix)","constant_features",1.5,10.2,0.786962734078041
+"C. shift.sd (case mix)","outcome_change",0,0,0
+"C. shift.sd (case mix)","outcome_change",0.25,6.97850506701324,0.617388400707752
+"C. shift.sd (case mix)","outcome_change",0.5,10.9517741508848,0.841919859028634
+"C. shift.sd (case mix)","outcome_change",0.75,13.8877922577952,1.05904631880093
+"C. shift.sd (case mix)","outcome_change",1,16.5633940261255,1.24690368753888
+"C. shift.sd (case mix)","outcome_change",1.5,19.9903277272723,1.40133788082709
+"C. shift.sd (case mix)","sd_log_ratio",0,0.692844459111736,0.00188092203846639
+"C. shift.sd (case mix)","sd_log_ratio",0.25,0.714826031129357,0.00288063038115294
+"C. shift.sd (case mix)","sd_log_ratio",0.5,0.774820496576161,0.0062173048712967
+"C. shift.sd (case mix)","sd_log_ratio",0.75,0.858336598210319,0.0092382854064529
+"C. shift.sd (case mix)","sd_log_ratio",1,0.940931624531686,0.0114514459139241
+"C. shift.sd (case mix)","sd_log_ratio",1.5,1.10272289388377,0.0156199017725367
+"C. shift.sd (case mix)","study_R2",0,0.488468648176353,0.00034112384525021
+"C. shift.sd (case mix)","study_R2",0.25,0.49155100840804,0.000770043274164478
+"C. shift.sd (case mix)","study_R2",0.5,0.49958661160902,0.0014040637826099
+"C. shift.sd (case mix)","study_R2",0.75,0.511523553016026,0.00199941867156549
+"C. shift.sd (case mix)","study_R2",1,0.526200775421773,0.0025562948412439
+"C. shift.sd (case mix)","study_R2",1.5,0.561270959177194,0.00354750313689398
+"C. shift.sd (case mix)","within_cor_change",0,0,0
+"C. shift.sd (case mix)","within_cor_change",0.25,0.0079135640141318,0.000105710917173105
+"C. shift.sd (case mix)","within_cor_change",0.5,0.0129560875451529,0.000187801393010389
+"C. shift.sd (case mix)","within_cor_change",0.75,0.0172069798127999,0.00024456071292167
+"C. shift.sd (case mix)","within_cor_change",1,0.0208577654564142,0.000296103579644472
+"C. shift.sd (case mix)","within_cor_change",1.5,0.0270960915136253,0.000358527367632679
+"C. shift.sd (case mix)","within_cor_noise",0,0.0523250850087001,0.000187762776590351
+"C. shift.sd (case mix)","within_cor_noise",0.25,0.0523250850087001,0.000187762776590351
+"C. shift.sd (case mix)","within_cor_noise",0.5,0.0523250850087001,0.000187762776590351
+"C. shift.sd (case mix)","within_cor_noise",0.75,0.0523250850087001,0.000187762776590351
+"C. shift.sd (case mix)","within_cor_noise",1,0.0523250850087001,0.000187762776590351
+"C. shift.sd (case mix)","within_cor_noise",1.5,0.0523250850087001,0.000187762776590351
+"C. shift.sd (case mix)","zero_frac_diff",0,0.0732405458089669,0.000349991458211892
+"C. shift.sd (case mix)","zero_frac_diff",0.25,0.082941910331384,0.0008856101698456
+"C. shift.sd (case mix)","zero_frac_diff",0.5,0.104199610136452,0.00146455344592114
+"C. shift.sd (case mix)","zero_frac_diff",0.75,0.128911500974659,0.0018796911695555
+"C. shift.sd (case mix)","zero_frac_diff",1,0.152408576998051,0.00220813903713679
+"C. shift.sd (case mix)","zero_frac_diff",1.5,0.190771929824561,0.00273865828057473
+"D. batch.loc.sd","constant_features",0,0,0
+"D. batch.loc.sd","constant_features",0.25,0.0333333333333333,0.0333333333333333
+"D. batch.loc.sd","constant_features",0.5,0.233333333333333,0.0920186554465537
+"D. batch.loc.sd","constant_features",0.75,1.36666666666667,0.227345164353213
+"D. batch.loc.sd","constant_features",1,4.53333333333333,0.354716442795188
+"D. batch.loc.sd","constant_features",1.5,14.8,0.70368488245315
+"D. batch.loc.sd","outcome_change",0,0,0
+"D. batch.loc.sd","outcome_change",0.25,0,0
+"D. batch.loc.sd","outcome_change",0.5,0,0
+"D. batch.loc.sd","outcome_change",0.75,0,0
+"D. batch.loc.sd","outcome_change",1,0,0
+"D. batch.loc.sd","outcome_change",1.5,0,0
+"D. batch.loc.sd","sd_log_ratio",0,0.691649214326612,0.00243624057810474
+"D. batch.loc.sd","sd_log_ratio",0.25,0.718393755782437,0.00354385429499727
+"D. batch.loc.sd","sd_log_ratio",0.5,0.797466275501447,0.00502036810685598
+"D. batch.loc.sd","sd_log_ratio",0.75,0.911866955231677,0.00761270689005135
+"D. batch.loc.sd","sd_log_ratio",1,1.02460629240111,0.00995235645866459
+"D. batch.loc.sd","sd_log_ratio",1.5,1.20081285799909,0.0142570997901169
+"D. batch.loc.sd","study_R2",0,0.488360198872483,0.000301967648464696
+"D. batch.loc.sd","study_R2",0.25,0.492843826915232,0.000508030874627963
+"D. batch.loc.sd","study_R2",0.5,0.505377016380158,0.00088499215220628
+"D. batch.loc.sd","study_R2",0.75,0.523244946880266,0.00134022896505572
+"D. batch.loc.sd","study_R2",1,0.544340320044814,0.00181085444285639
+"D. batch.loc.sd","study_R2",1.5,0.590339162320957,0.00268794071123939
+"D. batch.loc.sd","within_cor_change",0,0,0
+"D. batch.loc.sd","within_cor_change",0.25,0.00872130169784579,6.05415691179286e-05
+"D. batch.loc.sd","within_cor_change",0.5,0.0141983109731108,0.000101489349996631
+"D. batch.loc.sd","within_cor_change",0.75,0.0189389939723527,0.000130038100976697
+"D. batch.loc.sd","within_cor_change",1,0.0231061808383285,0.000153547568386026
+"D. batch.loc.sd","within_cor_change",1.5,0.0307841285390456,0.000197098522519569
+"D. batch.loc.sd","within_cor_noise",0,0.0520809083646321,0.000167810438849883
+"D. batch.loc.sd","within_cor_noise",0.25,0.0520809083646321,0.000167810438849883
+"D. batch.loc.sd","within_cor_noise",0.5,0.0520809083646321,0.000167810438849883
+"D. batch.loc.sd","within_cor_noise",0.75,0.0520809083646321,0.000167810438849883
+"D. batch.loc.sd","within_cor_noise",1,0.0520809083646321,0.000167810438849883
+"D. batch.loc.sd","within_cor_noise",1.5,0.0520809083646321,0.000167810438849883
+"D. batch.loc.sd","zero_frac_diff",0,0.0733754385964912,0.000481711823058714
+"D. batch.loc.sd","zero_frac_diff",0.25,0.0872678362573099,0.000700979743182446
+"D. batch.loc.sd","zero_frac_diff",0.5,0.113965692007797,0.00115340251497751
+"D. batch.loc.sd","zero_frac_diff",0.75,0.141661598440546,0.00152667209865394
+"D. batch.loc.sd","zero_frac_diff",1,0.165999220272904,0.00171471216373111
+"D. batch.loc.sd","zero_frac_diff",1.5,0.202152826510721,0.00185134315651804
+"E. batch.scale.sd","constant_features",0,0,0
+"E. batch.scale.sd","constant_features",0.25,0.0666666666666667,0.0463205555853101
+"E. batch.scale.sd","constant_features",0.5,1.9,0.268456636195199
+"E. batch.scale.sd","constant_features",0.75,5.6,0.458884203959646
+"E. batch.scale.sd","constant_features",1,10.6,0.45384690314494
+"E. batch.scale.sd","constant_features",1.5,19.3666666666667,0.607393779244679
+"E. batch.scale.sd","outcome_change",0,0,0
+"E. batch.scale.sd","outcome_change",0.25,0,0
+"E. batch.scale.sd","outcome_change",0.5,0,0
+"E. batch.scale.sd","outcome_change",0.75,0,0
+"E. batch.scale.sd","outcome_change",1,0,0
+"E. batch.scale.sd","outcome_change",1.5,0,0
+"E. batch.scale.sd","sd_log_ratio",0,0.689797515002409,0.00316043014840824
+"E. batch.scale.sd","sd_log_ratio",0.25,0.831187927893382,0.0051343539489171
+"E. batch.scale.sd","sd_log_ratio",0.5,1.06902321099697,0.00649701532841125
+"E. batch.scale.sd","sd_log_ratio",0.75,1.28581581728225,0.00977155889521722
+"E. batch.scale.sd","sd_log_ratio",1,1.4482250099913,0.00891160531360991
+"E. batch.scale.sd","sd_log_ratio",1.5,1.71231907364903,0.0127081018896521
+"E. batch.scale.sd","study_R2",0,0.488185056669028,0.000328588099235976
+"E. batch.scale.sd","study_R2",0.25,0.489466085481271,0.000577535491488202
+"E. batch.scale.sd","study_R2",0.5,0.491770579265665,0.00095616654437807
+"E. batch.scale.sd","study_R2",0.75,0.494135907833268,0.00124902518766025
+"E. batch.scale.sd","study_R2",1,0.496271105082199,0.00144600965518816
+"E. batch.scale.sd","study_R2",1.5,0.499690941173771,0.0016427263074462
+"E. batch.scale.sd","within_cor_change",0,0,0
+"E. batch.scale.sd","within_cor_change",0.25,0.0106226294520656,7.72074002246551e-05
+"E. batch.scale.sd","within_cor_change",0.5,0.0164340451772404,0.00011846812080733
+"E. batch.scale.sd","within_cor_change",0.75,0.0209097063392603,0.000148798361968251
+"E. batch.scale.sd","within_cor_change",1,0.0243405145909076,0.000137713033811406
+"E. batch.scale.sd","within_cor_change",1.5,0.0296067677179937,0.000196436769627371
+"E. batch.scale.sd","within_cor_noise",0,0.052357194467522,0.000222511851238235
+"E. batch.scale.sd","within_cor_noise",0.25,0.052357194467522,0.000222511851238235
+"E. batch.scale.sd","within_cor_noise",0.5,0.052357194467522,0.000222511851238235
+"E. batch.scale.sd","within_cor_noise",0.75,0.052357194467522,0.000222511851238235
+"E. batch.scale.sd","within_cor_noise",1,0.052357194467522,0.000222511851238235
+"E. batch.scale.sd","within_cor_noise",1.5,0.052357194467522,0.000222511851238235
+"E. batch.scale.sd","zero_frac_diff",0,0.0729925925925926,0.000431197835423388
+"E. batch.scale.sd","zero_frac_diff",0.25,0.0779844054580897,0.000551642740016477
+"E. batch.scale.sd","zero_frac_diff",0.5,0.0886877192982456,0.00069549999060894
+"E. batch.scale.sd","zero_frac_diff",0.75,0.100590253411306,0.000912584464387984
+"E. batch.scale.sd","zero_frac_diff",1,0.111460428849903,0.00113718081803136
+"E. batch.scale.sd","zero_frac_diff",1.5,0.129339571150097,0.0014327784958268
