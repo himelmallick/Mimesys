@@ -41,10 +41,15 @@ the preset.}
 \item{outcome}{Either one of \code{"linear"}, \code{"friedman"}, \code{"friedman2"},
 \code{"shared_latent"}, or \code{"interaction"}, or a named list. List options are
 \code{model}, \code{type}, \code{snr}, \code{friedman_share}, \code{shared_latent_function},
-\code{shared_latent_n_factors}, \code{nonlinear_weight}, \code{interaction_weight},
-\code{n_interactions}, \code{prevalence} (binary target case proportion),
-\code{baseline_hazard}, \code{cens_rate} (survival target censoring proportion),
-\code{cens_lower}, and \code{cens_upper}. See \code{\link[=gen_simmba]{gen_simmba()}}.}
+\code{shared_latent_n_factors}, \code{shared_latent_weight} (share of signal from
+the shared factors; the rest is view-specific), \code{nonlinear_weight},
+\code{interaction_weight}, \code{n_interactions}, \code{prevalence} (binary target case
+proportion), \code{baseline_hazard}, \code{cens_rate} (survival target censoring
+proportion), \code{cens_lower}, \code{cens_upper}, \code{cens_type} (\code{"uniform"},
+\code{"exponential"} or \code{"administrative"}), \code{cens_times} (user censoring
+times), \code{cens_dependence} (informative censoring), \code{cens_accrual},
+\code{cens_dropout}, \code{baseline_shape} (Weibull shape) and \code{keep_true_times}.
+See \code{\link[=gen_simmba]{gen_simmba()}}.}
 
 \item{signal}{Named list controlling spike-ins. Options are \code{prob},
 \code{neg_prob}, \code{effect_meanlog}, \code{effect_sdlog}, \code{align}, and \code{share}

@@ -136,6 +136,19 @@
     )
     eta_shared <- as.numeric(shared_res)
     shared_fallback <- isTRUE(attr(shared_res, "fallback"))
+    ## Optional view-specific latent signal mixed into the shared-latent
+    ## outcome (nothing is computed at the default weight of 1)
+    w_shared <- if (is.null(cfg$shared.latent.weight)) 1 else cfg$shared.latent.weight
+    eta_specific <- specific_scores <- NULL
+    if (identical(ygen.mode, "SharedLatent") && w_shared < 1) {
+        specific_scores <- do.call(rbind, lapply(seq_len(S), function(s) {
+            .view_specific_scores(pcls[[s]]$truth, tmpls[[s]])
+        }))
+        specific_scores <- apply(specific_scores, 2, .pooled_standardize, sid = sid)
+        specific_scores <- matrix(specific_scores, nrow = n, dimnames = list(NULL, views))
+        share <- if (is.null(cfg$signal.share)) rep(1 / M, M) else cfg$signal.share[views]
+        eta_specific <- .pooled_standardize(as.numeric(specific_scores %*% sqrt(share)), sid)
+    }
     A <- suppressWarnings(stats::cor(view_pred))
     A[!is.finite(A)] <- 0
 
@@ -182,6 +195,11 @@
 
     pcl$sample_metadata$Xbeta_linear <- eta_lin
     pcl$sample_metadata$Xbeta_shared <- eta_shared
+    if (!is.null(eta_specific)) {
+        pcl$sample_metadata$Xbeta_specific <- eta_specific
+        rownames(specific_scores) <- pcl$sample_metadata$subjectID
+        pcl$truth$specific_scores <- specific_scores
+    }
 
     ## 4. Final predictor
     eta <- switch(ygen.mode,
@@ -189,7 +207,8 @@
         Friedman     = Xbeta.friedman,
         Friedman2    = .mix_signals(eta_lin, Xbeta.friedman,
             cfg$nonlinear.weight),
-        SharedLatent = eta_shared,
+        SharedLatent = if (is.null(eta_specific)) eta_shared else
+            .mix_signals(eta_specific, eta_shared, w_shared),
         Interaction  = .mix_signals(eta_lin, eta_int, cfg$interaction.weight))
     pcl$sample_metadata$Xbeta <- eta
 
@@ -268,15 +287,41 @@
         h <- as.vector(cfg$baseline.hazard * exp(eta))
         time <- numeric(n)
         status <- integer(n)
+        ## Censoring target: one value, or one per study
+        cens_rate <- cfg$cens.rate
+        if (length(cens_rate) > 1L && length(cens_rate) != S) {
+            stop("cens.rate has ", length(cens_rate), " values for ", S,
+                " studies; give one value or one per study.", call. = FALSE)
+        }
+        cens_type <- if (is.null(cfg$cens.type)) "uniform" else cfg$cens.type
+        cens_dep <- if (is.null(cfg$cens.dependence)) 0 else cfg$cens.dependence
+        shape <- if (is.null(cfg$baseline.shape)) 1 else cfg$baseline.shape
+        keep_times <- isTRUE(cfg$keep.true.times)
+        if (keep_times) event_time <- cens_time <- numeric(n)
         for (s in seq_len(S)) {
             rows <- which(sid == s)
             T0 <- stats::rexp(length(rows), rate = h[rows])
-            C  <- .draw_censoring(T0, cfg$cens.rate, cfg$cens.lower, cfg$cens.upper)
+            ## Weibull baseline: E^(1/k) for E ~ Exp(h) has hazard h k t^(k-1)
+            if (shape != 1) T0 <- T0^(1 / shape)
+            C  <- .draw_censoring(T0,
+                if (length(cens_rate) > 1L) cens_rate[[s]] else cens_rate,
+                cfg$cens.lower, cfg$cens.upper, cens.type = cens_type,
+                cens.times = .resolve_censoring_times(cfg$cens.times, rows, n, s),
+                cens.dependence = cens_dep, eta = eta[rows],
+                cens.accrual = cfg$cens.accrual, cens.dropout = cfg$cens.dropout)
             time[rows] <- pmin(T0, C)
             status[rows] <- as.integer(C >= T0)
+            if (keep_times) {
+                event_time[rows] <- T0
+                cens_time[rows] <- C
+            }
         }
         pcl$sample_metadata$time   <- time
         pcl$sample_metadata$status <- status
+        if (keep_times) {
+            pcl$sample_metadata$event_time <- event_time
+            pcl$sample_metadata$cens_time <- cens_time
+        }
     }
 
     ## 7. Returned features: batch effects (if any) are added after the outcome
@@ -382,4 +427,26 @@
         view_pred[, view] <- view_pred[, view] * scale_factor
     }
     list(beta = B, view_pred = view_pred)
+}
+
+## View-specific latent signal of one study: in each view, the part of the
+## latent factor scores that is not shared with the other views,
+## F_m - sqrt(gamma_m) S B_m' = E_m R_m (independent of the shared variates and
+## across views), combined over the view's factors with weights proportional
+## to the factor's loading strength (column sums of squared loadings). Returns
+## an n x M matrix.
+.view_specific_scores <- function(truth, tmpl) {
+    ks <- vapply(tmpl$fits, function(f) f$rank, integer(1))
+    block <- rep(seq_along(ks), ks)
+    gamma <- truth$crosstalk
+    r <- if (is.matrix(truth$shared)) ncol(truth$shared) else 0L
+    out <- vapply(seq_along(ks), function(m) {
+        Fm <- truth$scores[, block == m, drop = FALSE]
+        if (r > 0L && gamma[[m]] > 0) {
+            Fm <- Fm - truth$shared %*% t(sqrt(gamma[[m]]) * tmpl$B[[m]])
+        }
+        w <- colSums(tmpl$fits[[m]]$Lambda^2)
+        as.numeric(Fm %*% (w / sqrt(sum(w^2))))
+    }, numeric(nrow(truth$scores)))
+    matrix(out, ncol = length(ks), dimnames = list(NULL, tmpl$views))
 }

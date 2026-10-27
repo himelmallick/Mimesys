@@ -150,6 +150,7 @@ Takes `n`, `template`, `p`, `crosstalk`, `feature.select`, `feature.jitter`,
 | `outcome.model` | `"linear"` | `"linear"`, `"friedman"`, `"friedman2"`, `"shared_latent"` or `"interaction"` (see equations below). |
 | `shared.latent.function` | `"linear"` | For `"shared_latent"`: `"linear"`, `"friedman"` or `"friedman2"` (the Friedman forms need at least 5 shared factors). |
 | `shared.latent.n.factors` | `NULL` | For `"shared_latent"`: number of shared factors used (`NULL`: all). |
+| `shared.latent.weight` | `1` | For `"shared_latent"`: share of signal variance from the shared factors; the rest is view-specific latent signal, so lower values make the views complementary. |
 | `nonlinear.weight` | `0.5` | Share of signal variance from the nonlinear part (`"friedman2"`, `shared.latent.function = "friedman2"`). |
 | `interaction.weight` | `0.5` | Share of signal variance from cross-view interactions (`"interaction"`; 1 = no main effects). |
 | `n.interactions` | `NULL` | Number of cross-view feature pairs for `"interaction"` (default: one per view pair). |
@@ -157,7 +158,12 @@ Takes `n`, `template`, `p`, `crosstalk`, `feature.select`, `feature.jitter`,
 | `snr` | `1` | Signal-to-noise ratio (on the latent logistic or log-time scale for binary and survival outcomes). |
 | `binary.prevalence` | `0.5` | Target case proportion for binary outcomes. |
 | `baseline.hazard` | `1` | Baseline hazard $h_0$ for survival outcomes. |
+| `baseline.shape` | `1` | Weibull shape $k$: hazard $h_0 k t^{k-1} e^{\eta}$ (1 = exponential; $k > 1$ rising, $k < 1$ falling hazard). |
+| `keep.true.times` | `FALSE` | Also store the latent `event_time` and `cens_time` of every sample. |
 | `cens.rate` | `NULL` | Target censoring proportion; `NULL` uses uniform censoring on (`cens.lower`, `cens.upper`) = (1, 3). |
+| `cens.type` | `"uniform"` | Censoring mechanism: `"uniform"`, `"exponential"` (constant loss to follow-up) or `"administrative"` (staggered entry over the first `cens.accrual` = 0.5 of the study, fixed study end, dropout probability `cens.dropout` = 0); scaled to reach `cens.rate`. |
+| `cens.times` | `NULL` | User censoring times: one time, one per sample, or a function of `n`; rescaled to `cens.rate` when it is given. |
+| `cens.dependence` | `0` | Informative censoring: censoring times are multiplied by $e^{-\delta z}$ ($z$ the standardized predictor), so with $\delta > 0$ higher-risk subjects are censored earlier. |
 | `train.fraction` | `0.7` | Share of samples in the training split. |
 | `nrep` | `1` | Number of replicates. |
 | `return.template` | `FALSE` | Include the fitted template (which contains the source data) in the result. |
@@ -180,6 +186,7 @@ same format, with all studies of a replicate pooled. In addition:
 | `shift.sd` | `0` | Case mix: SD of study mean shifts of the latent factor scores (biological; enters the outcome). |
 | `batch.loc.sd`, `batch.scale.sd` | `0` | Technical batch effects per study and feature, on the latent scale (added after the outcome). |
 | `holdout.studies` | `NULL` | Studies whose samples all go to the test split. |
+| `cens.rate` | `NULL` | Survival censoring target, solved within each study: one value or one per study (in order or named by study). `cens.times` may also be a list with one entry per study. |
 | `train.fraction` | `0.7` | Training share within each non-holdout study (`1` allowed with holdout studies). |
 
 ### `calibrate_crosstalk()` and `validate_template()`
@@ -234,7 +241,7 @@ crosstalk is calibrated for each study separately. The option lists use `snake_c
 
 | List | Options (default) | Maps to |
 |---|---|---|
-| `outcome` | `model` (`"linear"`; also `"friedman"`, `"friedman2"`, `"shared_latent"`, `"interaction"`), `type` (`"continuous"`), `snr` (1), `friedman_share`, `shared_latent_function` (`"linear"`), `shared_latent_n_factors`, `nonlinear_weight` (0.5), `interaction_weight` (0.5), `n_interactions`, `prevalence` (0.5), `baseline_hazard` (1), `cens_rate`, `cens_lower` (1), `cens_upper` (3) | `gen_simmba()` outcome arguments |
+| `outcome` | `model` (`"linear"`; also `"friedman"`, `"friedman2"`, `"shared_latent"`, `"interaction"`), `type` (`"continuous"`), `snr` (1), `friedman_share`, `shared_latent_function` (`"linear"`), `shared_latent_n_factors`, `nonlinear_weight` (0.5), `interaction_weight` (0.5), `n_interactions`, `prevalence` (0.5), `baseline_hazard` (1), `cens_rate`, `cens_lower` (1), `cens_upper` (3), `shared_latent_weight` (1), `cens_type` (`"uniform"`), `cens_times`, `cens_dependence` (0), `cens_accrual` (0.5), `cens_dropout` (0), `baseline_shape` (1), `keep_true_times` (`FALSE`) | `gen_simmba()` outcome arguments |
 | `signal` | `prob` (0.1), `neg_prob` (0.5), `effect_meanlog` (1), `effect_sdlog` (0.4), `align` (1), `share` | `signal.prob`, `signal.neg.prob`, `effect.meanlog`, `effect.sdlog`, `signal.align`, `signal.share` |
 | `null_model` | `feature_select` (`"random"`), `feature_jitter` (0.2), `view_models`, `back_transform` (`FALSE`) | null-data arguments |
 | `calibration` | `grid` (`seq(0, 1, 0.25)`), `nrep` (5), `nsample` (template size), `max_features_per_view` | `calibrate_crosstalk()` |
@@ -318,7 +325,7 @@ $\eta^{\text{lin}}_i = \sum_m \eta_{im}$, and the outcome model gives $\eta_i$:
 | `"linear"` | $\eta_i = \eta^{\text{lin}}_i$ |
 | `"friedman"` | $\eta_i = F(u_{i1},\dots,u_{i5})$, with $F(u) = 10\sin(\pi u_1 u_2) + 20(u_3 - 0.5)^2 + 10u_4 + 5u_5$ and $u_{ik} = \mathrm{rank}(x_{i j_k})/(n+1)$ for five signal features $j_1,\dots,j_5$ |
 | `"friedman2"` | $\eta = \sqrt{1-w}\ \mathrm{std}(\eta^{\text{lin}}) + \sqrt{w}\ \mathrm{std}(F)$, $w = $ `nonlinear.weight` |
-| `"shared_latent"` | $\eta = \mathrm{std}\big(\sum_{k=1}^{K} \tilde s_{ik} / \sqrt{K}\big)$ for the first $K$ simulated shared factors $s$ (`shared.latent.function = "linear"`); `"friedman"` uses $F$ of the first five rank-transformed $s_k$, `"friedman2"` mixes the two with $w$ |
+| `"shared_latent"` | $\eta = \mathrm{std}\big(\sum_{k=1}^{K} \tilde s_{ik} / \sqrt{K}\big)$ for the first $K$ simulated shared factors $s$ (`shared.latent.function = "linear"`); `"friedman"` uses $F$ of the first five rank-transformed $s_k$, `"friedman2"` mixes the two with $w$. With `shared.latent.weight` $= w_s < 1$: $\eta = \sqrt{w_s}\,\mathrm{std}(\eta^{\text{sh}}) + \sqrt{1-w_s}\,\mathrm{std}\big(\sum_m \sqrt{\pi_m}\,\mathrm{std}(P_m \omega_m)\big)$, where $P_m = F_m - \sqrt{\gamma_m} S B_m^\top$ is view $m$'s non-shared latent part, $\omega_m \propto$ the factors' loading strengths and $\pi_m$ = `signal.share` (equal by default) |
 | `"interaction"` | $\eta = \sqrt{1-w}\ \mathrm{std}(\eta^{\text{lin}}) + \sqrt{w}\ \mathrm{std}\big(\sum_t \tilde x_{i a_t}\tilde x_{i b_t}\big)$, pairs $(a_t, b_t)$ from different views, $w = $ `interaction.weight` |
 
 **4. Generate the outcome.**
@@ -327,7 +334,7 @@ $\eta^{\text{lin}}_i = \sum_m \eta_{im}$, and the outcome model gives $\eta_i$:
 |---|---|---|
 | `"continuous"` | $Y_i = \eta_i + \varepsilon_i,\quad \varepsilon_i \sim N\big(0,\ \mathrm{Var}(\eta)/\mathrm{snr}\big)$ | $\mathrm{Var}(\eta)/\mathrm{Var}(\varepsilon)$ |
 | `"binary"` | $\eta^\ast_i = b_0 + \mathrm{std}(\eta)_i\sqrt{\mathrm{snr}\cdot\pi^2/3},\quad Y_i \sim \mathrm{Bernoulli}\big(\mathrm{logit}^{-1}(\eta^\ast_i)\big)$, with $b_0$ solved so that the mean probability equals `binary.prevalence` | signal-to-noise on the latent logistic scale (error variance $\pi^2/3$) |
-| `"survival"` | $\eta^\ast_i = \mathrm{std}(\eta)_i\sqrt{\mathrm{snr}\cdot\pi^2/6},\quad T_i \sim \mathrm{Exponential}\big(h_0 e^{\eta^\ast_i}\big)$, $h_0 = $ `baseline.hazard`; censoring $C_i \sim U(\texttt{cens.lower}, \texttt{cens.upper})$, or $C_i = u_i\kappa$ with $\kappa$ solved for `cens.rate`; $\texttt{time} = \min(T_i, C_i)$, $\texttt{status} = \mathbf 1(T_i \le C_i)$ | signal-to-noise on the log-time scale (error variance $\pi^2/6$) |
+| `"survival"` | $\eta^\ast_i = \mathrm{std}(\eta)_i\sqrt{\mathrm{snr}\cdot\pi^2/6},\quad T_i = E_i^{1/k},\ E_i \sim \mathrm{Exponential}\big(h_0 e^{\eta^\ast_i}\big)$ (Weibull hazard $h_0 k t^{k-1} e^{\eta^\ast_i}$, $k$ = `baseline.shape`, default 1: exponential), $h_0 = $ `baseline.hazard`; censoring $C_i \sim U(\texttt{cens.lower}, \texttt{cens.upper})$, or $C_i = \kappa V_i e^{-\delta z_i}$ with $V_i$ from `cens.type` (uniform $U(0,1)$, exponential $\mathrm{Exp}(1)$, administrative $\min\{1 - a U_i,\ D_i\}$) or `cens.times`, $\delta$ = `cens.dependence` and $\kappa$ solved for `cens.rate`; $\texttt{time} = \min(T_i, C_i)$, $\texttt{status} = \mathbf 1(T_i \le C_i)$ | signal-to-noise on the log-time scale (error variance $\pi^2/6$) |
 
 The truth is stored with the data: $\beta_j$ in `rowData()$beta` (0 where the
 linear predictor does not enter the outcome), the features that drive the

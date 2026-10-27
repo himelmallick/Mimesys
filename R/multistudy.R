@@ -68,6 +68,13 @@
 #'   study is also accepted.
 #' @param seed Random seed. The global random-number state is restored when the
 #'   function returns. Use `NULL` to use the current random state.
+#' @param cens.rate Target censoring proportion for survival outcomes (see
+#'   [gen_simmba()]), solved within each study: one value for every study, or
+#'   one value per study (in study order, or named by study) to give the
+#'   studies different follow-up.
+#' @param cens.times Optional censoring times (see [gen_simmba()]): one time,
+#'   one per sample of all studies (in study order), a function of `n` (called
+#'   once per study), or a list with one such entry per study.
 #' @inheritParams gen_simmba
 #'
 #' @details
@@ -105,7 +112,8 @@
 #' `sqrt(snr_s * pi^2 / 6)`. Binary outcomes then get the study intercepts
 #' and a common intercept solved so the pooled prevalence equals
 #' `binary.prevalence`.
-#' Survival censoring (`cens.rate`) is solved within each study.
+#' Survival censoring (`cens.rate`) is solved within each study, so studies
+#' can be given different censoring proportions.
 #'
 #' @return A list in the [gen_simmba()] format: `trainDat` and `testDat` hold
 #'   one pooled data set per replicate, with `sample_metadata$study` and
@@ -158,15 +166,23 @@ gen_multistudy <- function(n,
     outcome.model = c("linear", "friedman", "friedman2", "shared_latent", "interaction"),
     shared.latent.function = c("linear", "friedman", "friedman2"),
     shared.latent.n.factors = NULL,
+    shared.latent.weight = 1,
     nonlinear.weight = 0.5,
     interaction.weight = 0.5,
     n.interactions = NULL,
     outcome.type = c("continuous", "binary", "survival"),
     binary.prevalence = 0.5,
     baseline.hazard = 1,
+    baseline.shape = 1,
     cens.rate = NULL,
     cens.lower = 1,
     cens.upper = 3,
+    cens.type = c("uniform", "exponential", "administrative"),
+    cens.times = NULL,
+    cens.dependence = 0,
+    cens.accrual = 0.5,
+    cens.dropout = 0,
+    keep.true.times = FALSE,
     nrep = 1,
     seed = 1234,
     return.template = FALSE,
@@ -221,15 +237,24 @@ gen_multistudy <- function(n,
         outcome.model = outcome.model,
         shared.latent.function = shared.latent.function,
         shared.latent.n.factors = shared.latent.n.factors,
+        shared.latent.weight = shared.latent.weight,
         nonlinear.weight = nonlinear.weight,
         interaction.weight = interaction.weight, n.interactions = n.interactions,
         outcome.type = outcome.type, binary.prevalence = binary.prevalence,
         baseline.hazard = baseline.hazard, cens.rate = cens.rate,
         cens.lower = cens.lower, cens.upper = cens.upper,
+        cens.type = cens.type, cens.times = cens.times,
+        cens.dependence = cens.dependence, cens.accrual = cens.accrual,
+        cens.dropout = cens.dropout, baseline.shape = baseline.shape,
+        keep.true.times = keep.true.times,
         back.transform = back.transform)
     tmpl <- setup$template
     cfg <- setup$cfg
     cfg$crosstalk <- crosstalk
+    cfg$cens.rate <- .per_study_values(cfg$cens.rate, study_names, "cens.rate")
+    if (is.list(cfg$cens.times) && length(cfg$cens.times) != S) {
+        stop("A list of cens.times needs one entry per study (", S, ").", call. = FALSE)
+    }
     if (!is.null(tmpl_list)) {
         if (identical(cfg$ygen.mode, "SharedLatent") &&
             length(unique(vapply(tmpl_list, function(t) t$shared.rank, integer(1)))) > 1L) {
@@ -310,10 +335,29 @@ gen_multistudy <- function(n,
         nrep = nrep, seed = seed, outcome.model = cfg$outcome.model,
         outcome.type = cfg$outcome.type, binary.prevalence = binary.prevalence,
         baseline.hazard = baseline.hazard, cens.rate = cens.rate,
-        cens.lower = cens.lower, cens.upper = cens.upper)
+        cens.lower = cens.lower, cens.upper = cens.upper) |>
+        .add_nondefault_settings(cfg)
 }
 
 ## ---- multi-study helpers -------------------------------------------------
+
+## A setting given once or once per study (in study order or named by study)
+.per_study_values <- function(x, study_names, name) {
+    if (is.null(x) || length(x) == 1L) return(x)
+    S <- length(study_names)
+    if (length(x) != S) {
+        stop(name, " has ", length(x), " values for ", S,
+            " studies; give one value or one per study.", call. = FALSE)
+    }
+    if (!is.null(names(x))) {
+        if (!setequal(names(x), study_names)) {
+            stop("The names of ", name, " must be the study names: ",
+                paste(study_names, collapse = ", "), ".", call. = FALSE)
+        }
+        x <- x[study_names]
+    }
+    unname(x)
+}
 
 ## Heterogeneity draws use a side stream: a seed derived from the current
 ## random state (without advancing it) plus a tag. The main stream, and so the
@@ -493,6 +537,9 @@ gen_multistudy <- function(n,
     out$feature_table <- pcl$feature_table[, rows, drop = FALSE]
     if (!is.null(pcl$truth$scores)) out$truth$scores <- pcl$truth$scores[rows, , drop = FALSE]
     if (!is.null(pcl$truth$shared)) out$truth$shared <- pcl$truth$shared[rows, , drop = FALSE]
+    if (!is.null(pcl$truth$specific_scores)) {
+        out$truth$specific_scores <- pcl$truth$specific_scores[rows, , drop = FALSE]
+    }
     out
 }
 
@@ -617,12 +664,18 @@ simulate_multistudy <- function(template,
         friedman.share = outcome$friedman_share, outcome.model = outcome$model,
         shared.latent.function = outcome$shared_latent_function,
         shared.latent.n.factors = outcome$shared_latent_n_factors,
+        shared.latent.weight = outcome$shared_latent_weight,
         nonlinear.weight = outcome$nonlinear_weight,
         interaction.weight = outcome$interaction_weight,
         n.interactions = outcome$n_interactions,
         outcome.type = outcome$type, binary.prevalence = outcome$prevalence,
         baseline.hazard = outcome$baseline_hazard, cens.rate = outcome$cens_rate,
         cens.lower = outcome$cens_lower, cens.upper = outcome$cens_upper,
+        cens.type = outcome$cens_type, cens.times = outcome$cens_times,
+        cens.dependence = outcome$cens_dependence,
+        cens.accrual = outcome$cens_accrual, cens.dropout = outcome$cens_dropout,
+        baseline.shape = outcome$baseline_shape,
+        keep.true.times = isTRUE(outcome$keep_true_times),
         nrep = as.integer(nrep), seed = seed
     )
     sim$crosstalk_calibration <- resolved$calibration

@@ -32,7 +32,6 @@ Useful links:
 Authors:
 \itemize{
   \item Himel Mallick \email{himel.mallick@merck.com}
-  \item Ziyu Liu
 }
 
 }

@@ -373,10 +373,15 @@ simulate_mimesys_null <- function(template,
 #' @param outcome Either one of `"linear"`, `"friedman"`, `"friedman2"`,
 #'   `"shared_latent"`, or `"interaction"`, or a named list. List options are
 #'   `model`, `type`, `snr`, `friedman_share`, `shared_latent_function`,
-#'   `shared_latent_n_factors`, `nonlinear_weight`, `interaction_weight`,
-#'   `n_interactions`, `prevalence` (binary target case proportion),
-#'   `baseline_hazard`, `cens_rate` (survival target censoring proportion),
-#'   `cens_lower`, and `cens_upper`. See [gen_simmba()].
+#'   `shared_latent_n_factors`, `shared_latent_weight` (share of signal from
+#'   the shared factors; the rest is view-specific), `nonlinear_weight`,
+#'   `interaction_weight`, `n_interactions`, `prevalence` (binary target case
+#'   proportion), `baseline_hazard`, `cens_rate` (survival target censoring
+#'   proportion), `cens_lower`, `cens_upper`, `cens_type` (`"uniform"`,
+#'   `"exponential"` or `"administrative"`), `cens_times` (user censoring
+#'   times), `cens_dependence` (informative censoring), `cens_accrual`,
+#'   `cens_dropout`, `baseline_shape` (Weibull shape) and `keep_true_times`.
+#'   See [gen_simmba()].
 #' @param signal Named list controlling spike-ins. Options are `prob`,
 #'   `neg_prob`, `effect_meanlog`, `effect_sdlog`, `align`, and `share`
 #'   (see `signal.prob`, `signal.neg.prob`, `effect.meanlog`, `effect.sdlog`,
@@ -453,12 +458,18 @@ simulate_mimesys <- function(template,
         friedman.share = outcome$friedman_share, outcome.model = outcome$model,
         shared.latent.function = outcome$shared_latent_function,
         shared.latent.n.factors = outcome$shared_latent_n_factors,
+        shared.latent.weight = outcome$shared_latent_weight,
         nonlinear.weight = outcome$nonlinear_weight,
         interaction.weight = outcome$interaction_weight,
         n.interactions = outcome$n_interactions,
         outcome.type = outcome$type, binary.prevalence = outcome$prevalence,
         baseline.hazard = outcome$baseline_hazard, cens.rate = outcome$cens_rate,
         cens.lower = outcome$cens_lower, cens.upper = outcome$cens_upper,
+        cens.type = outcome$cens_type, cens.times = outcome$cens_times,
+        cens.dependence = outcome$cens_dependence,
+        cens.accrual = outcome$cens_accrual, cens.dropout = outcome$cens_dropout,
+        baseline.shape = outcome$baseline_shape,
+        keep.true.times = isTRUE(outcome$keep_true_times),
         nrep = as.integer(nrep), seed = seed
     )
     sim$crosstalk_calibration <- resolved$calibration
@@ -484,7 +495,10 @@ simulate_mimesys <- function(template,
         shared_latent_n_factors = NULL, nonlinear_weight = 0.5,
         interaction_weight = 0.5, n_interactions = NULL,
         prevalence = 0.5, baseline_hazard = 1,
-        cens_rate = NULL, cens_lower = 1, cens_upper = 3
+        cens_rate = NULL, cens_lower = 1, cens_upper = 3,
+        shared_latent_weight = 1, cens_type = "uniform", cens_times = NULL,
+        cens_dependence = 0, cens_accrual = 0.5, cens_dropout = 0,
+        baseline_shape = 1, keep_true_times = FALSE
     )
     outcome_defaults <- utils::modifyList(outcome_defaults,
         preset_settings$outcome)

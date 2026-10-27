@@ -33,15 +33,23 @@ gen_multistudy(
   outcome.model = c("linear", "friedman", "friedman2", "shared_latent", "interaction"),
   shared.latent.function = c("linear", "friedman", "friedman2"),
   shared.latent.n.factors = NULL,
+  shared.latent.weight = 1,
   nonlinear.weight = 0.5,
   interaction.weight = 0.5,
   n.interactions = NULL,
   outcome.type = c("continuous", "binary", "survival"),
   binary.prevalence = 0.5,
   baseline.hazard = 1,
+  baseline.shape = 1,
   cens.rate = NULL,
   cens.lower = 1,
   cens.upper = 3,
+  cens.type = c("uniform", "exponential", "administrative"),
+  cens.times = NULL,
+  cens.dependence = 0,
+  cens.accrual = 0.5,
+  cens.dropout = 0,
+  keep.true.times = FALSE,
   nrep = 1,
   seed = 1234,
   return.template = FALSE,
@@ -211,6 +219,20 @@ with the Friedman nonlinear component using \code{nonlinear.weight}.}
 factors are used. Friedman shared-latent functions require at least five
 selected shared factors.}
 
+\item{shared.latent.weight}{Share of signal variance from the shared latent
+factors, between 0 and 1, for \code{outcome.model = "shared_latent"}. The
+rest comes from view-specific latent signal: in each view, the part of the
+view's latent factor scores that is not shared with the other views
+(independent across views), summed with weights proportional to each
+factor's loading strength. Views contribute equally, or by
+\code{signal.share} when it is given. Both parts are standardized and
+combined as \code{sqrt(w) * shared + sqrt(1 - w) * view_specific}. The
+default \code{1} is a purely shared outcome (every view carries the same
+signal); smaller values make the views complementary, since each view
+then carries outcome information the others do not. The view-specific
+part is stored in \code{sample_metadata$Xbeta_specific} and the per-view
+scores in \code{truth$specific_scores}.}
+
 \item{nonlinear.weight}{Share of signal variance from the nonlinear Friedman
 part, between 0 and 1, for \code{outcome.model = "friedman2"} and
 \code{shared.latent.function = "friedman2"}. Both parts are standardized and
@@ -236,17 +258,61 @@ prevalence equals this value.}
 \item{baseline.hazard}{Multiplicative scale on the baseline hazard for survival
 outcomes.}
 
-\item{cens.rate}{Optional target censoring proportion for survival outcomes.
-If supplied, censoring times are uniform on \code{(0, c)} with \code{c}
-solved so that this proportion of subjects is censored; \code{0} means no
-censoring. If \code{NULL}, censoring times are uniform on
-\code{(cens.lower, cens.upper)}.}
+\item{baseline.shape}{Weibull shape \eqn{k} of the baseline hazard for
+survival outcomes (default 1, a constant hazard: exponential event times).
+Event times then have hazard
+\code{baseline.hazard * k * t^(k - 1) * exp(eta)}, still proportional
+hazards: \code{k > 1} gives a hazard that rises over follow-up,
+\code{k < 1} one that falls. \code{snr} keeps its meaning on the log-time
+scale, since signal and error variance of \code{log T} both scale by
+\eqn{1/k^2}.}
+
+\item{cens.rate}{Target censoring proportion for survival outcomes (see
+\code{\link[=gen_simmba]{gen_simmba()}}), solved within each study: one value for every study, or
+one value per study (in study order, or named by study) to give the
+studies different follow-up.}
 
 \item{cens.lower}{Lower bound for uniform censoring time when
 \code{cens.rate} is \code{NULL}.}
 
 \item{cens.upper}{Upper bound for uniform censoring time when
 \code{cens.rate} is \code{NULL}.}
+
+\item{cens.type}{Censoring mechanism for survival outcomes.
+\code{"uniform"} (default): censoring times uniform on \code{(0, c)}.
+\code{"exponential"}: exponential censoring times (constant loss to
+follow-up), mean \code{c}. \code{"administrative"}: staggered entry and a
+fixed study end; subjects enter uniformly over the first
+\code{cens.accrual} fraction of the study, the study ends at time
+\code{c}, and subjects still at risk are censored then, so the censoring
+time is \code{c * (1 - cens.accrual * U)}; with \code{cens.dropout > 0}
+subjects can also drop out earlier. In every case \code{c} is solved for
+\code{cens.rate}.}
+
+\item{cens.times}{Optional censoring times (see \code{\link[=gen_simmba]{gen_simmba()}}): one time,
+one per sample of all studies (in study order), a function of \code{n} (called
+once per study), or a list with one such entry per study.}
+
+\item{cens.dependence}{Informative censoring strength (default 0,
+independent censoring). Each censoring time is multiplied by
+\code{exp(-cens.dependence * z)}, where \code{z} is the standardized
+linear predictor, so with a positive value higher-risk subjects are
+censored earlier (and with a negative value, later). This violates the
+independent-censoring assumption of most survival methods. Censoring is
+still solved for \code{cens.rate}.}
+
+\item{cens.accrual}{Fraction of the study period over which subjects enter
+when \code{cens.type = "administrative"}, between 0 and 1 (default 0.5).
+\code{0} gives a single fixed censoring time.}
+
+\item{cens.dropout}{Probability that a subject drops out (is lost to
+follow-up) before the study end when \code{cens.type = "administrative"},
+between 0 and 1 (default 0). Dropout times are exponential.}
+
+\item{keep.true.times}{Logical; if \code{TRUE}, survival outcomes also store
+the latent event time and censoring time of every sample in
+\code{sample_metadata$event_time} and \code{sample_metadata$cens_time}
+(\code{time} is their minimum). Default \code{FALSE}.}
 
 \item{nrep}{Number of independent simulation replicates (default 1).}
 
@@ -321,7 +387,8 @@ within-study SD and multiplied by \code{sqrt(snr_s * pi^2 / 3)} or
 \code{sqrt(snr_s * pi^2 / 6)}. Binary outcomes then get the study intercepts
 and a common intercept solved so the pooled prevalence equals
 \code{binary.prevalence}.
-Survival censoring (\code{cens.rate}) is solved within each study.
+Survival censoring (\code{cens.rate}) is solved within each study, so studies
+can be given different censoring proportions.
 }
 \examples{
 data(stelzer_mae)

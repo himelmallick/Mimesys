@@ -502,6 +502,30 @@ and `"friedman2"` mixes the two. The outcome then depends on the cross-view
 latent process rather than on individual features; with crosstalk 0 it is
 unrelated to the features (a warning is given).
 
+**Shared and view-specific latent signal.** View $m$'s simulated factor
+scores are $f_m = \sqrt{\gamma_m}\,B_m s + (I - \gamma_m B_m B_m^\top)^{1/2}\epsilon_m$
+(Section 4.1). Their non-shared part
+
+$$p_m = f_m - \sqrt{\gamma_m}\,B_m s = (I - \gamma_m B_m B_m^\top)^{1/2}\epsilon_m$$
+
+is independent of the shared variates $s$ and of the other views. Each view
+gets one view-specific score, its non-shared factors weighted by loading
+strength, $q_{im} = \mathrm{std}\big(\omega_m^\top p_{m,i}\big)$ with
+$\omega_{mk} \propto \sum_j \lambda_{jk}^2$ (template loadings), and with view
+weights $\pi_m$ (`signal.share`, equal by default)
+
+$$\eta^{\mathrm{VS}}_i = \mathrm{std}\Big(\sum_m \sqrt{\pi_m}\, q_{im}\Big), \qquad \eta = \sqrt{w_s}\ \mathrm{std}(\eta^{\mathrm{SL}}) + \sqrt{1 - w_s}\ \eta^{\mathrm{VS}},$$
+
+with $w_s =$ `shared.latent.weight` (default 1, a purely shared outcome; at
+$w_s = 1$ nothing is computed, so earlier results are unchanged). At $w_s = 1$
+every view carries the same outcome signal; at $w_s = 0$ each view carries its
+own, independent part. On the Stelzer template at maximum crosstalk
+(n = 2000, 60 features per view) each view's features explain
+$R^2 \approx 0.9$ of $\eta$ at $w_s = 1$, about $0.6$ at $w_s = 0.5$ and about
+$0.35$ at $w_s = 0$ (the three views together: $0.95$--$0.97$ throughout).
+$\eta^{\mathrm{VS}}$ is stored as `Xbeta_specific` and the $q_{im}$ as
+`truth$specific_scores`.
+
 **Interaction.** Pairs $(a_t, b_t)$ of features from *different* views
 (`n.interactions`, default one per view pair; signal features preferred) give
 
@@ -532,6 +556,14 @@ Typical regimes:
   outcome depends on the shared factors, and crosstalk sets how strongly they
   are visible in each view (with $\gamma = 0$ they are invisible, and very high
   crosstalk makes the views redundant);
+- **shared versus view-specific latent signal:** `shared.latent.weight`
+  moves a shared-latent outcome from redundant views ($w_s = 1$) to
+  complementary views ($w_s = 0$), independently of crosstalk. In checks on
+  the Stelzer template (n = 300, maximum crosstalk, lasso base learners),
+  late fusion (per-view models, stacked) beat early fusion (one model on all
+  features) at $w_s = 1$, where it averages several noisy proxies of the same
+  signal, and lost at $w_s = 0$, where each per-view model sees only part of
+  the signal; continuous and survival outcomes behaved the same way;
 - **nonlinear or interacting signal:** `"friedman"`, `"friedman2"`,
   `"interaction"`.
 
@@ -563,13 +595,42 @@ with $b_0$ solved so that $\frac1n\sum_i\mathrm{logit}^{-1}(\eta^\ast_i) =$
 with $E \sim \mathrm{Exp}(1)$, and $\log E$ has a Gumbel distribution with
 variance $\pi^2/6$; hence
 
-$$\eta^\ast_i = \mathrm{std}(\eta)_i\sqrt{\mathrm{snr}\,\pi^2/6}, \qquad T_i \sim \mathrm{Exponential}\big(\text{rate } h_0e^{\eta^\ast_i}\big), \qquad h_0 = \texttt{baseline.hazard}.$$
+$$\eta^\ast_i = \mathrm{std}(\eta)_i\sqrt{\mathrm{snr}\,\pi^2/6}, \qquad T_i = E_i^{1/k}, \quad E_i \sim \mathrm{Exponential}\big(\text{rate } h_0e^{\eta^\ast_i}\big), \qquad h_0 = \texttt{baseline.hazard}.$$
 
-Censoring times are $C_i \sim U(\texttt{cens.lower}, \texttt{cens.upper})$
+With $k =$ `baseline.shape` (default 1, exponential) the event times are
+Weibull with hazard $h_0\,k\,t^{k-1}e^{\eta^\ast_i}$: still proportional
+hazards, with a hazard that rises ($k > 1$) or falls ($k < 1$) over follow-up.
+Since $\log T = (-\log h_0 - \eta^\ast + \log E)/k$, signal and error variance
+both scale by $1/k^2$ and `snr` keeps its meaning.
+
+Censoring. The default rule is unchanged: $C_i \sim U(\texttt{cens.lower}, \texttt{cens.upper})$
 (defaults 1 and 3), or, with `cens.rate` $= c$, $C_i = u_i\kappa$ with
 $u_i \sim U(0,1)$ and $\kappa$ solved so that
-$\frac1n\sum_i\mathbf 1(u_i\kappa < T_i) = c$ ($c = 0$: no censoring). Then
-$\texttt{time}_i = \min(T_i, C_i)$ and $\texttt{status}_i = \mathbf{1}(T_i \le C_i)$.
+$\frac1n\sum_i\mathbf 1(u_i\kappa < T_i) = c$ ($c = 0$: no censoring). In
+general a censoring time is
+
+$$C_i = \kappa\, V_i\, e^{-\delta z_i}, \qquad \tfrac1n\textstyle\sum_i \mathbf 1(C_i < T_i) = c,$$
+
+with $z$ the standardized predictor, $\delta =$ `cens.dependence` (default 0)
+and $V_i$ from the mechanism `cens.type`:
+
+| `cens.type` | $V_i$ | Meaning |
+|---|---|---|
+| `"uniform"` (default) | $U(0,1)$ | censoring spread evenly over follow-up |
+| `"exponential"` | $\mathrm{Exp}(1)$ | constant loss to follow-up |
+| `"administrative"` | $\min\{1 - a\,U_i,\ D_i\}$, $D_i \sim \mathrm{Exp}\big(-\log(1-d)\big)$ | entry uniform over the first fraction $a$ = `cens.accrual` (0.5) of a study that ends at $\kappa$; dropout before the end with probability $d$ = `cens.dropout` (0) |
+
+User times `cens.times` (one time, one per sample, or a function of $n$;
+`Inf` = never censored) replace $V_i$; without `cens.rate` they are used as
+given ($\kappa = 1$). The solve is on $\log\kappa$ by root finding, and the
+achieved proportion matches $c$ to within one subject. With $\delta > 0$,
+higher-risk subjects are censored earlier: censoring is informative, the
+independent-censoring assumption of the Cox model, Harrell's C and IPCW
+time-dependent AUC is violated, and these metrics are biased (in checks the
+true predictor's C and AUC rose). Then
+$\texttt{time}_i = \min(T_i, C_i)$ and $\texttt{status}_i = \mathbf{1}(T_i \le C_i)$;
+with `keep.true.times = TRUE`, $T_i$ and $C_i$ are stored as `event_time` and
+`cens_time`.
 
 ### 5.7 Truth and split
 
@@ -578,7 +639,8 @@ the outcome: `"friedman"`, `"shared_latent"`, or a weight of 1);
 `friedman_term` and `interaction_term` flag the nonlinear and interaction
 features; `outcome_feature` flags every feature that drives the outcome. The
 final predictor and its components are stored as `Xbeta`, `Xbeta_linear`,
-`Xbeta_shared`, `Xbeta_friedman` and `Xbeta_interaction`. A random
+`Xbeta_shared`, `Xbeta_friedman`, `Xbeta_interaction` and (with
+`shared.latent.weight` $< 1$) `Xbeta_specific`. A random
 $\mathrm{round}(n\cdot\texttt{train.fraction})$ samples (default 70%) form
 the training set.
 
@@ -1005,8 +1067,10 @@ $\epsilon_s \sim N(0, \sigma^2_{\mathrm{snr}})$:
   $\varepsilon \sim N(0, V/\mathrm{SNR}_s)$;
 - binary: $\operatorname{logit} P(Y = 1) = c + \alpha_s + \sqrt{\mathrm{SNR}_s\,\pi^2/3}\,(\eta - \bar\eta)/\sqrt V$,
   with $c$ solved so the pooled prevalence is `binary.prevalence`;
-- survival: hazard $h_0\exp\{\alpha_s + \sqrt{\mathrm{SNR}_s\,\pi^2/6}\,(\eta - \bar\eta)/\sqrt V\}$,
-  censoring solved within each study.
+- survival: hazard $h_0\,k\,t^{k-1}\exp\{\alpha_s + \sqrt{\mathrm{SNR}_s\,\pi^2/6}\,(\eta - \bar\eta)/\sqrt V\}$,
+  censoring solved within each study; `cens.rate` may give one target per
+  study (different follow-up), and `cens.times` a list with one entry per
+  study.
 
 Studies in `holdout.studies` go entirely to the test set; the others are
 split by `train.fraction`.
@@ -1094,7 +1158,7 @@ nonlinear parts), and crosstalk sets how visible they are in each view.
 |---|---|
 | `fit_template()` | `rank = NULL`, `var.explained = 0.7`, `max.rank` $= \lfloor n_0/3\rfloor$, `shared.rank = NULL`, `nperm = 200`, `shared.rank.runs = 1` |
 | `sim_from_template()` | `crosstalk = 1`, `feature.select = "random"`, `feature.jitter = 0.2`, `back.transform = FALSE` |
-| `gen_simmba()` | `signal.prob = 0.1`, `signal.neg.prob = 0.5`, `effect.meanlog = 1`, `effect.sdlog = 0.4`, `outcome.model = "linear"`, `outcome.type = "continuous"`, `snr = 1`, `binary.prevalence = 0.5`, `nonlinear.weight = interaction.weight = 0.5`, `train.fraction = 0.7`, `nrep = 1` |
+| `gen_simmba()` | `signal.prob = 0.1`, `signal.neg.prob = 0.5`, `effect.meanlog = 1`, `effect.sdlog = 0.4`, `outcome.model = "linear"`, `outcome.type = "continuous"`, `snr = 1`, `binary.prevalence = 0.5`, `nonlinear.weight = interaction.weight = 0.5`, `shared.latent.weight = 1`, `baseline.hazard = baseline.shape = 1`, `cens.rate = NULL`, `cens.type = "uniform"`, `cens.dependence = 0`, `cens.accrual = 0.5`, `cens.dropout = 0`, `keep.true.times = FALSE`, `train.fraction = 0.7`, `nrep = 1` |
 | `calibrate_crosstalk()` | `crosstalk.grid = seq(0, 1, 0.25)`, `nrep = 5`, `n` $= n_0$ |
 | `gen_multistudy()` | `effect.cor = 1`, `support.overlap = 1`, `intercept.sd = snr.sd = shift.sd = batch.loc.sd = batch.scale.sd = 0`, `holdout.studies = NULL`; other defaults as `gen_simmba()` |
 | `gen_mediation()` | `n.mediators = 5`, `TIE = 1`, `DE = 0`, `exposure.type = "binary"`, `exposure.prevalence = 0.5`, `n.mc = 5000`, `min.variability = 0.2`, `stage.links`: density 0.3, strength 0.3 |
@@ -1112,6 +1176,8 @@ nonlinear parts), and crosstalk sets how visible they are in each view.
 - Small templates give noisy shared structure and shallow calibration curves.
 - Planted outcomes are controlled experiments, not imitations of the real
   outcome mechanism.
+- Survival outcomes have proportional hazards (exponential or Weibull
+  baseline); non-proportional hazards are not simulated.
 - Mediation does not include confounders, survival outcomes or count data with
   library sizes, and simulates one study.
 - In multi-study simulation, case-mix and batch shifts act on the latent scale,

@@ -90,6 +90,19 @@
 #'   \code{outcome.model = "shared_latent"}. If \code{NULL}, all available shared
 #'   factors are used. Friedman shared-latent functions require at least five
 #'   selected shared factors.
+#' @param shared.latent.weight Share of signal variance from the shared latent
+#'   factors, between 0 and 1, for \code{outcome.model = "shared_latent"}. The
+#'   rest comes from view-specific latent signal: in each view, the part of the
+#'   view's latent factor scores that is not shared with the other views
+#'   (independent across views), summed with weights proportional to each
+#'   factor's loading strength. Views contribute equally, or by
+#'   \code{signal.share} when it is given. Both parts are standardized and
+#'   combined as \code{sqrt(w) * shared + sqrt(1 - w) * view_specific}. The
+#'   default \code{1} is a purely shared outcome (every view carries the same
+#'   signal); smaller values make the views complementary, since each view
+#'   then carries outcome information the others do not. The view-specific
+#'   part is stored in \code{sample_metadata$Xbeta_specific} and the per-view
+#'   scores in \code{truth$specific_scores}.
 #' @param nonlinear.weight Share of signal variance from the nonlinear Friedman
 #'   part, between 0 and 1, for \code{outcome.model = "friedman2"} and
 #'   \code{shared.latent.function = "friedman2"}. Both parts are standardized and
@@ -109,15 +122,59 @@
 #'   prevalence equals this value.
 #' @param baseline.hazard Multiplicative scale on the baseline hazard for survival
 #'   outcomes.
+#' @param baseline.shape Weibull shape \eqn{k} of the baseline hazard for
+#'   survival outcomes (default 1, a constant hazard: exponential event times).
+#'   Event times then have hazard
+#'   \code{baseline.hazard * k * t^(k - 1) * exp(eta)}, still proportional
+#'   hazards: \code{k > 1} gives a hazard that rises over follow-up,
+#'   \code{k < 1} one that falls. \code{snr} keeps its meaning on the log-time
+#'   scale, since signal and error variance of \code{log T} both scale by
+#'   \eqn{1/k^2}.
+#' @param keep.true.times Logical; if \code{TRUE}, survival outcomes also store
+#'   the latent event time and censoring time of every sample in
+#'   \code{sample_metadata$event_time} and \code{sample_metadata$cens_time}
+#'   (\code{time} is their minimum). Default \code{FALSE}.
 #' @param cens.rate Optional target censoring proportion for survival outcomes.
-#'   If supplied, censoring times are uniform on \code{(0, c)} with \code{c}
+#'   If supplied, the censoring times of the chosen \code{cens.type} (or the
+#'   supplied \code{cens.times}) are multiplied by a common factor \code{c},
 #'   solved so that this proportion of subjects is censored; \code{0} means no
-#'   censoring. If \code{NULL}, censoring times are uniform on
-#'   \code{(cens.lower, cens.upper)}.
+#'   censoring. If \code{NULL}, uniform censoring times are uniform on
+#'   \code{(cens.lower, cens.upper)} and supplied \code{cens.times} are used
+#'   as they are; the other censoring types then need \code{cens.rate}.
 #' @param cens.lower Lower bound for uniform censoring time when
 #'   \code{cens.rate} is \code{NULL}.
 #' @param cens.upper Upper bound for uniform censoring time when
 #'   \code{cens.rate} is \code{NULL}.
+#' @param cens.type Censoring mechanism for survival outcomes.
+#'   \code{"uniform"} (default): censoring times uniform on \code{(0, c)}.
+#'   \code{"exponential"}: exponential censoring times (constant loss to
+#'   follow-up), mean \code{c}. \code{"administrative"}: staggered entry and a
+#'   fixed study end; subjects enter uniformly over the first
+#'   \code{cens.accrual} fraction of the study, the study ends at time
+#'   \code{c}, and subjects still at risk are censored then, so the censoring
+#'   time is \code{c * (1 - cens.accrual * U)}; with \code{cens.dropout > 0}
+#'   subjects can also drop out earlier. In every case \code{c} is solved for
+#'   \code{cens.rate}.
+#' @param cens.times Optional user-supplied censoring times, used instead of
+#'   \code{cens.type}: a single time for every subject (e.g. a fixed end of
+#'   follow-up), one positive time per simulated sample (in sample order, before
+#'   the train/test split; \code{Inf} for never censored), or a function of
+#'   \code{n} returning \code{n} times. With \code{cens.rate} the times are
+#'   rescaled by a common factor to reach the target, so they give only the
+#'   shape of the censoring distribution.
+#' @param cens.dependence Informative censoring strength (default 0,
+#'   independent censoring). Each censoring time is multiplied by
+#'   \code{exp(-cens.dependence * z)}, where \code{z} is the standardized
+#'   linear predictor, so with a positive value higher-risk subjects are
+#'   censored earlier (and with a negative value, later). This violates the
+#'   independent-censoring assumption of most survival methods. Censoring is
+#'   still solved for \code{cens.rate}.
+#' @param cens.accrual Fraction of the study period over which subjects enter
+#'   when \code{cens.type = "administrative"}, between 0 and 1 (default 0.5).
+#'   \code{0} gives a single fixed censoring time.
+#' @param cens.dropout Probability that a subject drops out (is lost to
+#'   follow-up) before the study end when \code{cens.type = "administrative"},
+#'   between 0 and 1 (default 0). Dropout times are exponential.
 #' @param nrep Number of independent simulation replicates (default 1).
 #' @param seed Random seed. The global random-number state is restored when the
 #'   function returns. Use \code{NULL} to use the current random state.
@@ -187,15 +244,23 @@ gen_simmba <- function(n,
     outcome.model = c("linear", "friedman", "friedman2", "shared_latent", "interaction"),
     shared.latent.function = c("linear", "friedman", "friedman2"),
     shared.latent.n.factors = NULL,
+    shared.latent.weight = 1,
     nonlinear.weight = 0.5,
     interaction.weight = 0.5,
     n.interactions = NULL,
     outcome.type = c("continuous", "binary", "survival"),
     binary.prevalence = 0.5,
     baseline.hazard = 1,
+    baseline.shape = 1,
     cens.rate = NULL,
     cens.lower = 1,
     cens.upper = 3,
+    cens.type = c("uniform", "exponential", "administrative"),
+    cens.times = NULL,
+    cens.dependence = 0,
+    cens.accrual = 0.5,
+    cens.dropout = 0,
+    keep.true.times = FALSE,
     nrep = 1,
     seed = 1234,
     return.template = FALSE,
@@ -220,14 +285,22 @@ gen_simmba <- function(n,
         outcome.model = outcome.model,
         shared.latent.function = shared.latent.function,
         shared.latent.n.factors = shared.latent.n.factors,
+        shared.latent.weight = shared.latent.weight,
         nonlinear.weight = nonlinear.weight,
         interaction.weight = interaction.weight, n.interactions = n.interactions,
         outcome.type = outcome.type, binary.prevalence = binary.prevalence,
         baseline.hazard = baseline.hazard, cens.rate = cens.rate,
         cens.lower = cens.lower, cens.upper = cens.upper,
+        cens.type = cens.type, cens.times = cens.times,
+        cens.dependence = cens.dependence, cens.accrual = cens.accrual,
+        cens.dropout = cens.dropout, baseline.shape = baseline.shape,
+        keep.true.times = keep.true.times,
         back.transform = back.transform)
     tmpl <- setup$template
     cfg <- setup$cfg
+    if (length(cfg$cens.rate) > 1L) {
+        stop("cens.rate must be NULL or a single number in [0, 1).", call. = FALSE)
+    }
 
     trainDat <- testDat <- agreement.emp <- vector("list", nrep)
     names(trainDat) <- names(testDat) <- names(agreement.emp) <- paste("Rep",
@@ -268,6 +341,24 @@ gen_simmba <- function(n,
         outcome.type = cfg$outcome.type, binary.prevalence = binary.prevalence,
         baseline.hazard = baseline.hazard, cens.rate = cens.rate,
         cens.lower = cens.lower, cens.upper = cens.upper)
+    ## New settings are listed only when they differ from their defaults, so
+    ## results made with the defaults keep their earlier structure
+    .add_nondefault_settings(out, cfg)
+}
+
+## Settings added after the first release are recorded only when they are
+## not at their defaults (they are also in sample_metadata and truth).
+.add_nondefault_settings <- function(out, cfg) {
+    if (cfg$shared.latent.weight < 1) out$shared.latent.weight <- cfg$shared.latent.weight
+    if (!identical(cfg$cens.type, "uniform")) out$cens.type <- cfg$cens.type
+    if (!is.null(cfg$cens.times)) out$cens.times <- cfg$cens.times
+    if (cfg$cens.dependence != 0) out$cens.dependence <- cfg$cens.dependence
+    if (identical(cfg$cens.type, "administrative")) {
+        out$cens.accrual <- cfg$cens.accrual
+        out$cens.dropout <- cfg$cens.dropout
+    }
+    if (cfg$baseline.shape != 1) out$baseline.shape <- cfg$baseline.shape
+    if (isTRUE(cfg$keep.true.times)) out$keep.true.times <- TRUE
     out
 }
 
@@ -280,7 +371,10 @@ gen_simmba <- function(n,
     outcome.model, shared.latent.function, shared.latent.n.factors,
     nonlinear.weight, interaction.weight, n.interactions, outcome.type,
     binary.prevalence, baseline.hazard, cens.rate, cens.lower, cens.upper,
-    back.transform) {
+    back.transform, shared.latent.weight = 1,
+    cens.type = "uniform", cens.times = NULL, cens.dependence = 0,
+    cens.accrual = 0.5, cens.dropout = 0, baseline.shape = 1,
+    keep.true.times = FALSE) {
     outcome.model  <- match.arg(outcome.model, c("linear", "friedman",
         "friedman2", "shared_latent", "interaction"))
     ## Internal codes for the outcome models
@@ -301,9 +395,34 @@ gen_simmba <- function(n,
         stop("snr must be a single positive number.", call. = FALSE)
     }
     .check_prevalence(binary.prevalence, "binary.prevalence")
-    if (!is.null(cens.rate) && (!is.numeric(cens.rate) || length(cens.rate) != 1L ||
-        !is.finite(cens.rate) || cens.rate < 0 || cens.rate >= 1)) {
+    if (!is.null(cens.rate) && (!is.numeric(cens.rate) || length(cens.rate) < 1L ||
+        any(!is.finite(cens.rate)) || any(cens.rate < 0) || any(cens.rate >= 1))) {
         stop("cens.rate must be NULL or a number in [0, 1).", call. = FALSE)
+    }
+    .check_fraction(shared.latent.weight, "shared.latent.weight")
+    if (!is.numeric(baseline.shape) || length(baseline.shape) != 1L ||
+        !is.finite(baseline.shape) || baseline.shape <= 0) {
+        stop("baseline.shape must be a single positive number.", call. = FALSE)
+    }
+    if (!is.logical(keep.true.times) || length(keep.true.times) != 1L ||
+        is.na(keep.true.times)) {
+        stop("keep.true.times must be TRUE or FALSE.", call. = FALSE)
+    }
+    cens.type <- match.arg(cens.type, c("uniform", "exponential", "administrative"))
+    .check_censoring_times(cens.times)
+    if (!is.numeric(cens.dependence) || length(cens.dependence) != 1L ||
+        !is.finite(cens.dependence)) {
+        stop("cens.dependence must be a single finite number.", call. = FALSE)
+    }
+    .check_fraction(cens.accrual, "cens.accrual")
+    if (!is.numeric(cens.dropout) || length(cens.dropout) != 1L ||
+        !is.finite(cens.dropout) || cens.dropout < 0 || cens.dropout >= 1) {
+        stop("cens.dropout must be a number in [0, 1).", call. = FALSE)
+    }
+    if (identical(outcome.type, "survival") && is.null(cens.rate) &&
+        is.null(cens.times) && !identical(cens.type, "uniform")) {
+        stop("cens.type = \"", cens.type, "\" needs cens.rate (the target censoring ",
+            "proportion), which sets the time scale of the censoring times.", call. = FALSE)
     }
 
     ## 0. Fit the template once (skipped if a fitted template is supplied)
@@ -336,7 +455,7 @@ gen_simmba <- function(n,
         if (tmpl$shared.rank == 0L) {
             warning("The template has no shared latent factors; SharedLatent outcomes fall back ",
                 "to the average of the view-specific linear predictors.", call. = FALSE)
-        } else if (all(gamma_named == 0)) {
+        } else if (all(gamma_named == 0) && shared.latent.weight > 0) {
             warning("outcome.model = \"shared_latent\" with crosstalk = 0: shared factors do not enter ",
                 "any simulated feature, so the outcome is unrelated to the features.", call. = FALSE)
         }
@@ -351,11 +470,16 @@ gen_simmba <- function(n,
         friedman.share = friedman.share, outcome.model = outcome.model,
         ygen.mode = ygen.mode, shared.latent.function = shared.latent.function,
         shared.latent.n.factors = shared.latent.n.factors,
+        shared.latent.weight = shared.latent.weight,
         nonlinear.weight = nonlinear.weight,
         interaction.weight = interaction.weight, n.interactions = n.interactions,
         outcome.type = outcome.type, binary.prevalence = binary.prevalence,
         baseline.hazard = baseline.hazard, cens.rate = cens.rate,
-        cens.lower = cens.lower, cens.upper = cens.upper))
+        cens.lower = cens.lower, cens.upper = cens.upper,
+        cens.type = cens.type, cens.times = cens.times,
+        cens.dependence = cens.dependence, cens.accrual = cens.accrual,
+        cens.dropout = cens.dropout, baseline.shape = baseline.shape,
+        keep.true.times = keep.true.times))
 }
 
 
@@ -373,23 +497,106 @@ gen_simmba <- function(n,
     out
 }
 
-## Censoring times: uniform(cens.lower, cens.upper), or uniform(0, c) with c
-## solved so that the requested proportion of subjects is censored.
+## Censoring times. The original rule (cens.type "uniform", no supplied times,
+## independent censoring) is kept as it was: uniform(cens.lower, cens.upper),
+## or uniform(0, c) with c solved so that the requested proportion of subjects
+## is censored. Otherwise a censoring time is c * V: V is drawn from the
+## chosen mechanism (or supplied), optionally multiplied by
+## exp(-dependence * z) for informative censoring, and c is solved for
+## cens.rate (c = 1 without a target).
 .draw_censoring <- function(T0, cens.rate = NULL, cens.lower = 1,
-    cens.upper = 3) {
+    cens.upper = 3, cens.type = "uniform", cens.times = NULL,
+    cens.dependence = 0, eta = NULL, cens.accrual = 0.5, cens.dropout = 0) {
     n <- length(T0)
-    if (is.null(cens.rate)) {
-        return(stats::runif(n, cens.lower, cens.upper))
+    if (identical(cens.type, "uniform") && is.null(cens.times) &&
+        cens.dependence == 0) {
+        if (is.null(cens.rate)) {
+            return(stats::runif(n, cens.lower, cens.upper))
+        }
+        if (cens.rate == 0) {
+            return(rep(Inf, n))
+        }
+        u <- stats::runif(n)
+        f <- function(log_c) mean(u * exp(log_c) < T0) - cens.rate
+        lo <- log(min(T0)) - 10
+        hi <- log(max(T0)) + 10
+        log_c <- stats::uniroot(f, interval = c(lo, hi), tol = 1e-10)$root
+        return(u * exp(log_c))
     }
-    if (cens.rate == 0) {
+    if (!is.null(cens.rate) && cens.rate == 0) {
         return(rep(Inf, n))
     }
-    u <- stats::runif(n)
-    f <- function(log_c) mean(u * exp(log_c) < T0) - cens.rate
-    lo <- log(min(T0)) - 10
-    hi <- log(max(T0)) + 10
+    V <- if (!is.null(cens.times)) {
+        as.numeric(cens.times)
+    } else switch(cens.type,
+        uniform = if (is.null(cens.rate)) stats::runif(n, cens.lower, cens.upper) else
+            stats::runif(n),
+        exponential = stats::rexp(n),
+        administrative = {
+            V <- 1 - cens.accrual * stats::runif(n)
+            if (cens.dropout > 0) {
+                ## dropout before the study end (time 1) with probability cens.dropout
+                V <- pmin(V, stats::rexp(n) / -log(1 - cens.dropout))
+            }
+            V
+        })
+    if (cens.dependence != 0) {
+        if (is.null(eta)) stop("Informative censoring needs the linear predictor.", call. = FALSE)
+        V <- V * exp(-cens.dependence * .standardize_predictor(eta))
+    }
+    if (is.null(cens.rate)) return(V)
+    .solve_censoring_scale(T0, V, cens.rate)
+}
+
+## Smallest common factor c with mean(c * V < T0) equal to the target (to
+## within one subject), searched on the log scale.
+.solve_censoring_scale <- function(T0, V, cens.rate) {
+    fin <- is.finite(V)
+    max_rate <- mean(fin)
+    if (cens.rate > max_rate) {
+        stop("cens.rate = ", cens.rate, " cannot be reached: only ",
+            round(100 * max_rate, 1), "% of the supplied censoring times are finite.",
+            call. = FALSE)
+    }
+    f <- function(log_c) mean(V * exp(log_c) < T0) - cens.rate
+    lo <- log(min(T0)) - log(max(V[fin])) - 10
+    hi <- log(max(T0)) - log(min(V[fin])) + 10
     log_c <- stats::uniroot(f, interval = c(lo, hi), tol = 1e-10)$root
-    u * exp(log_c)
+    V * exp(log_c)
+}
+
+## User censoring times: NULL, a function, or positive numbers (Inf allowed).
+## The length is checked against the number of samples when they are drawn.
+.check_censoring_times <- function(cens.times) {
+    if (is.null(cens.times) || is.function(cens.times)) return(invisible(TRUE))
+    if (is.list(cens.times)) {
+        for (x in cens.times) .check_censoring_times(x)
+        return(invisible(TRUE))
+    }
+    if (!is.numeric(cens.times) || length(cens.times) == 0L || anyNA(cens.times) ||
+        any(cens.times <= 0)) {
+        stop("cens.times must be NULL, a function of n, or positive numbers ",
+            "(Inf for never censored).", call. = FALSE)
+    }
+    invisible(TRUE)
+}
+
+## Censoring times supplied for the rows of one study: a function of n, one
+## time for all, one per study sample, or one per sample of all studies
+.resolve_censoring_times <- function(cens.times, rows, n_total, study) {
+    if (is.null(cens.times)) return(NULL)
+    if (is.list(cens.times) && !is.function(cens.times)) cens.times <- cens.times[[study]]
+    n <- length(rows)
+    x <- if (is.function(cens.times)) cens.times(n) else cens.times
+    .check_censoring_times(x)
+    if (is.function(x) || !is.numeric(x)) {
+        stop("A cens.times function must return numbers.", call. = FALSE)
+    }
+    if (length(x) == 1L) return(rep(x, n))
+    if (length(x) == n) return(as.numeric(x))
+    if (length(x) == n_total) return(as.numeric(x[rows]))
+    stop("cens.times has ", length(x), " values; give one time, one per sample (",
+        n_total, ") or a function of n.", call. = FALSE)
 }
 
 ## ---- spike-in helpers ---------------------------------------------------

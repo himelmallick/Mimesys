@@ -1,5 +1,41 @@
 # MimeSys 0.99.0
 
+## Survival censoring and view-specific signal (new)
+
+* `cens.type` in `gen_simmba()` and `gen_multistudy()` (`outcome$cens_type`
+  in the `simulate_*()` wrappers) chooses the censoring mechanism:
+  `"uniform"` (default, unchanged), `"exponential"` (constant loss to
+  follow-up) or `"administrative"` (staggered entry over the first
+  `cens.accrual` fraction of the study, a fixed study end and optional
+  exponential dropout, `cens.dropout`). Each type is scaled to reach
+  `cens.rate`.
+* `cens.times` takes user censoring times: one time for everyone, one per
+  sample, or a function of `n`. With `cens.rate` they are rescaled to the
+  target, so they set only the shape of the censoring distribution.
+* `cens.dependence` adds informative censoring: censoring times are
+  multiplied by `exp(-cens.dependence * z)`, `z` the standardized linear
+  predictor, so higher-risk subjects are censored earlier (a scenario that
+  breaks the independent-censoring assumption).
+* `gen_multistudy()` and `simulate_multistudy()` accept one `cens.rate` per
+  study (in study order or named by study), and a list of per-study
+  `cens.times`.
+* `shared.latent.weight` (`outcome$shared_latent_weight`) for
+  `outcome.model = "shared_latent"`: the share of signal variance from the
+  shared factors. The rest comes from view-specific latent signal (the part
+  of each view's latent factor scores that is not shared with the other
+  views, independent across views), so lower values make the views carry
+  complementary outcome information. The view-specific part is returned in
+  `sample_metadata$Xbeta_specific` and `truth$specific_scores`.
+* `baseline.shape` (`outcome$baseline_shape`) gives a Weibull baseline
+  hazard, `baseline.hazard * k * t^(k - 1)`: still proportional hazards, with
+  a hazard that rises (`k > 1`) or falls (`k < 1`) over follow-up. `snr`
+  keeps its log-time meaning.
+* `keep.true.times = TRUE` (`outcome$keep_true_times`) stores each sample's
+  latent `event_time` and `cens_time` in `sample_metadata`.
+* All new arguments default to the previous behaviour; simulations with the
+  defaults are bit-identical to before, and new settings are recorded in the
+  result only when they differ from their defaults.
+
 ## Multi-study simulation (new)
 
 * `gen_multistudy()` simulates several studies from one template, with
