@@ -1,5 +1,24 @@
 # MimeSys 0.99.0
 
+## One main interface: `simulate_mimesys(design = )` (breaking)
+
+* `simulate_mimesys()` is the single user-facing simulation function. Its new
+  `design` argument chooses what is simulated: `"outcome"` (default,
+  unchanged), `"null"`, `"multistudy"` or `"mediation"`. It gains the
+  `heterogeneity`, `nstudy` and `mediation` option lists.
+* `simulate_mimesys_null()`, `simulate_multistudy()` and
+  `simulate_mediation()` are removed; use
+  `simulate_mimesys(design = "null")`, `simulate_mimesys(design = "multistudy")`
+  and `simulate_mimesys(design = "mediation")` with the same arguments. Each
+  design gives exactly the result of the removed function with the same
+  settings and seed. (Entries below that name the removed functions refer to
+  these designs.)
+* Supplying an option list that the chosen design does not use (for example
+  `mediation` with `design = "outcome"`, or several `n` without
+  `design = "multistudy"`) is an error instead of being ignored.
+* The engines `gen_simmba()`, `gen_multistudy()`, `gen_mediation()` and
+  `sim_from_template()` stay exported for full control.
+
 ## Survival censoring and view-specific signal (new)
 
 * `cens.type` in `gen_simmba()` and `gen_multistudy()` (`outcome$cens_type`

@@ -671,7 +671,7 @@ $\bar D(\gamma) \le \bar D(\hat\gamma) + \mathrm{SE}(\hat\gamma)$ are
 `near_optimal`, and `selection_frequency` gives how often each value is best
 in individual replicates. Only cross-view blocks enter the criterion because
 crosstalk changes only cross-view dependence. Calibration needs at least two
-views and two features per view; the MAE wrappers run it with seed + 1. With
+views and two features per view; `simulate_mimesys()` runs it with seed + 1. With
 small templates the curve is often shallow; then report results over a range
 of crosstalk values.
 
@@ -1096,19 +1096,32 @@ replicate-to-replicate noise; the outcome is unchanged by batch. On sparse
 microbiome templates, keep `shift.sd` and the batch SDs at about 0.5 or below:
 larger values make rare taxa constant within a study.
 
-## 10. MAE wrappers and reproducibility
+## 10. The main interface and reproducibility
 
-`simulate_mimesys()`, `simulate_mimesys_null()`, `simulate_multistudy()` and
-`simulate_mediation()` fit the template if needed, calibrate crosstalk by default
-(`crosstalk = "calibrate"`; skipped for a single view, no shared factors, or
-fewer than two features per view), call the simulators, and return one
-`MultiAssayExperiment` per replicate: assay `simulated`, feature truth in
-`rowData()`, outcome, exposure and split in `colData()`, settings, provenance
-and latent truth in `metadata()`.
+`simulate_mimesys()` is the one user-facing simulation function. Its `design`
+argument chooses the simulation and the engine:
+
+| `design` | Simulates | Engine | Option lists it reads |
+|---|---|---|---|
+| `"outcome"` (default) | features with planted outcome signal, train/test split | `gen_simmba()` (Section 5) | `preset`, `outcome`, `signal`, `train_fraction` |
+| `"null"` | features only | `sim_from_template()` (Section 4) | none |
+| `"multistudy"` | several heterogeneous studies in one MAE | `gen_multistudy()` (Section 9) | `preset`, `outcome`, `signal`, `heterogeneity`, `nstudy`, `train_fraction` |
+| `"mediation"` | exposure, mediators, outcome, exact effects | `gen_mediation()` (Sections 7--8) | `mediation` |
+
+An option list that the chosen design does not read is an error, as are
+several `n` or a list of study templates without `design = "multistudy"`.
+For every design, `simulate_mimesys()` fits the template if needed, calibrates
+crosstalk by default (`crosstalk = "calibrate"`; skipped for a single view, no
+shared factors, or fewer than two features per view; per study with one
+template per study), calls the engine, and returns one `MultiAssayExperiment`
+per replicate: assay `simulated`, feature truth in `rowData()`, outcome,
+exposure, study and split in `colData()`, settings, provenance and latent
+truth in `metadata()`. Each design gives exactly the engine result with the
+same settings and seed.
 
 Every function that uses random numbers has `seed = 1234` by default and
 restores the caller's random-number state on exit; `seed = NULL` uses the
-current stream. Calibration inside the wrappers uses seed + 1, so its
+current stream. Calibration inside `simulate_mimesys()` uses seed + 1, so its
 replicates never share random numbers with the simulation, and internal loops
 call unseeded engines so replicates are independent.
 

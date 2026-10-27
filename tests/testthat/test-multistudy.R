@@ -1,4 +1,4 @@
-## Multi-study simulation (gen_multistudy(), simulate_multistudy())
+## Multi-study simulation (gen_multistudy(), simulate_mimesys(design = "multistudy"))
 
 ms_template <- function() {
     data(stelzer_mae, package = "MimeSys", envir = environment())
@@ -219,9 +219,9 @@ test_that("two-part views keep zeros with batch effects and back-transform", {
     expect_true(all(d$feature_metadata$scale == "original"))
 })
 
-test_that("simulate_multistudy() returns one MAE with study labels", {
+test_that("design = \"multistudy\" returns one MAE with study labels", {
     tm <- ms_template()
-    mae <- simulate_multistudy(tm, n = c(30, 40), p = 8, crosstalk = 1,
+    mae <- simulate_mimesys(design = "multistudy", tm, n = c(30, 40), p = 8, crosstalk = 1,
         heterogeneity = list(effect_cor = 0.5, batch_loc_sd = 0.3,
             holdout_studies = 2),
         outcome = list(type = "binary", prevalence = 0.4), seed = 1)
@@ -229,9 +229,9 @@ test_that("simulate_multistudy() returns one MAE with study labels", {
     expect_equal(ncol(mae[[1]]), 70)
     expect_true(all(cd$split[cd$study == "Study_2"] == "test"))
     expect_equal(S4Vectors::metadata(mae)$simulation$nstudy, 2L)
-    expect_s3_class(simulate_multistudy(tm, n = 20, nstudy = 2, p = 5,
+    expect_s3_class(simulate_mimesys(design = "multistudy", tm, n = 20, nstudy = 2, p = 5,
         crosstalk = 1, nrep = 2, seed = 1), "mimesys_mae_simulation")
-    expect_error(simulate_multistudy(tm, n = 20, nstudy = 2, p = 5, crosstalk = 1,
+    expect_error(simulate_mimesys(design = "multistudy", tm, n = 20, nstudy = 2, p = 5, crosstalk = 1,
         heterogeneity = list(effect_corr = 0.5)), "unsupported option")
 })
 
@@ -335,7 +335,7 @@ test_that("per-study templates are checked for compatibility", {
         expect_error(gen_multistudy(n = 20, template = tl, p = 5,
             outcome.model = "shared_latent"), "same shared.rank")
     }
-    mae <- simulate_multistudy(suppressWarnings(fit_study_templates(ms_cohorts(),
+    mae <- simulate_mimesys(design = "multistudy", suppressWarnings(fit_study_templates(ms_cohorts(),
         shared.rank = 1)), n = c(25, 30), p = 8, crosstalk = 1, seed = 1)
     expect_equal(as.vector(table(MultiAssayExperiment::colData(mae)$study)), c(25, 30))
 })

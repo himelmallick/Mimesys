@@ -106,7 +106,7 @@ test_that("simulate wrappers pass the new outcome options", {
     expect_identical(sim$cens.type, "administrative")
     expect_identical(sim$shared.latent.weight, 0.5)
     expect_false(is.null(sim$trainDat$Rep_1$sample_metadata$Xbeta_specific))
-    ms <- simulate_multistudy(tm_cs, n = 60, nstudy = 2, p = 10, crosstalk = 1,
+    ms <- simulate_mimesys(design = "multistudy", tm_cs, n = 60, nstudy = 2, p = 10, crosstalk = 1,
         outcome = list(type = "survival", cens_rate = c(0.2, 0.4)),
         return_type = "simulation", seed = 8)
     m <- surv_meta(ms)
@@ -196,7 +196,7 @@ test_that("keep.true.times stores the latent event and censoring times", {
     m0 <- surv_meta(sim0)
     expect_null(m0$event_time)
     expect_identical(m0[, c("time", "status", "Xbeta")], m[, c("time", "status", "Xbeta")])
-    ms <- simulate_multistudy(tm_cs, n = 50, nstudy = 2, p = 10, crosstalk = 1,
+    ms <- simulate_mimesys(design = "multistudy", tm_cs, n = 50, nstudy = 2, p = 10, crosstalk = 1,
         outcome = list(type = "survival", cens_rate = 0.3, baseline_shape = 1.5,
             keep_true_times = TRUE), return_type = "simulation", seed = 13)
     expect_false(is.null(ms$trainDat$Rep_1$sample_metadata$event_time))

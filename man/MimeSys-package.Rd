@@ -12,10 +12,12 @@ within- and cross-view dependence of the template, with controllable sample
 size, feature counts, cross-view dependence (crosstalk) and outcome signal.
 }
 \details{
-The main entry points are \code{\link[=fit_template]{fit_template()}}, \code{\link[=simulate_mimesys]{simulate_mimesys()}} (returns a
-\code{MultiAssayExperiment}), \code{\link[=gen_simmba]{gen_simmba()}} (lower-level replicate lists),
-\code{\link[=calibrate_crosstalk]{calibrate_crosstalk()}}, \code{\link[=validate_template]{validate_template()}}, and, for mediation,
-\code{\link[=gen_mediation]{gen_mediation()}} and \code{\link[=simulate_mediation]{simulate_mediation()}}. See
+The main entry points are \code{\link[=fit_template]{fit_template()}} and \code{\link[=simulate_mimesys]{simulate_mimesys()}}, which
+runs every simulation design (outcome, null, multi-study and mediation) and
+returns a \code{MultiAssayExperiment}; \code{\link[=calibrate_crosstalk]{calibrate_crosstalk()}} and
+\code{\link[=validate_template]{validate_template()}} check the template. The engines \code{\link[=gen_simmba]{gen_simmba()}},
+\code{\link[=gen_multistudy]{gen_multistudy()}}, \code{\link[=gen_mediation]{gen_mediation()}} and \code{\link[=sim_from_template]{sim_from_template()}} return
+lower-level replicate lists. See
 \code{vignette("mimesys-workflow", package = "MimeSys")}.
 }
 \seealso{

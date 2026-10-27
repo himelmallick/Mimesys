@@ -543,50 +543,8 @@ gen_multistudy <- function(n,
     out
 }
 
-#' Simulate multi-study multi-omics data as a MultiAssayExperiment
-#'
-#' MAE-first interface to [gen_multistudy()], with the same presets, outcome
-#' and signal options as [simulate_mimesys()]. All studies of a replicate are
-#' returned in one `MultiAssayExperiment`; `colData()` holds the `study` and
-#' `split` of every sample.
-#'
-#' @inheritParams simulate_mimesys
-#' @param template One template (or data set) for every study, or one per
-#'   study: a list of templates from [fit_study_templates()] or a list of data
-#'   sets (fitted with `fit_study_templates(template, ...)`, using
-#'   `template_args`). See [gen_multistudy()].
-#' @param n Samples per study: one value for every study (with `nstudy`) or one
-#'   value per study.
-#' @param nstudy Number of studies. Defaults to `length(n)`.
-#' @param heterogeneity Named list of between-study differences. Options are
-#'   `effect_cor`, `support_overlap`, `intercept_sd`, `snr_sd`, `shift_sd`,
-#'   `batch_loc_sd`, `batch_scale_sd` and `holdout_studies` (see
-#'   `effect.cor`, `support.overlap`, `intercept.sd`, `snr.sd`, `shift.sd`,
-#'   `batch.loc.sd`, `batch.scale.sd` and `holdout.studies` in
-#'   [gen_multistudy()]). The defaults give homogeneous studies.
-#' @param calibration Named list controlling automatic crosstalk calibration
-#'   (see [simulate_mimesys()]). With one template, calibration uses the
-#'   average study size; with one template per study, each study's crosstalk
-#'   is calibrated on its own template and size.
-#' @param train_fraction Fraction of each non-holdout study's samples labelled
-#'   `"train"`.
-#' @param return_type `"mae"` (default) returns MAE-oriented output. Use
-#'   `"simulation"` to return the underlying [gen_multistudy()] result.
-#'
-#' @return A `MultiAssayExperiment`, a `mimesys_mae_simulation` list (several
-#'   replicates), or the [gen_multistudy()] result when
-#'   `return_type = "simulation"`. The study-level truth is in
-#'   `metadata(mae)$truth`.
-#' @examples
-#' data(stelzer_mae)
-#' tmpl <- fit_template(stelzer_mae, shared.rank = 2)
-#' mae <- simulate_multistudy(tmpl, n = c(40, 50, 30), p = 10, crosstalk = 1,
-#'     heterogeneity = list(effect_cor = 0.5, shift_sd = 0.3,
-#'         holdout_studies = 3), seed = 1)
-#' table(MultiAssayExperiment::colData(mae)$study,
-#'     MultiAssayExperiment::colData(mae)$split)
-#' @export
-simulate_multistudy <- function(template,
+## design = "multistudy" of simulate_mimesys(): MAE interface to gen_multistudy()
+.simulate_multistudy_mae <- function(template,
     n,
     nstudy = NULL,
     p = NULL,
@@ -692,7 +650,7 @@ simulate_multistudy <- function(template,
 #'
 #' Fits a [fit_template()] template to each study's data, restricted to the
 #' views and features that every study has, so the templates can be used
-#' together in [gen_multistudy()] and [simulate_multistudy()] (one template
+#' together in [gen_multistudy()] and `simulate_mimesys(design = "multistudy")` (one template
 #' per study). Features that a fit drops in any study (all missing, or
 #' constant) are removed from every study and the templates are refitted, so
 #' all templates end up with the same features in the same order.

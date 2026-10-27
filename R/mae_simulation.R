@@ -280,36 +280,8 @@ mimesys_presets <- function() {
     list(value = fit$best_crosstalk, calibration = fit)
 }
 
-#' Simulate null multi-omics data as a MultiAssayExperiment
-#'
-#' Fits or accepts a MimeSys template, calibrates crosstalk by default using
-#' empirical cross-view correlation blocks, and returns simulated null feature
-#' data in a [MultiAssayExperiment::MultiAssayExperiment()]. No spike-in
-#' coefficients or outcomes are generated.
-#'
-#' @inheritParams simulate_mimesys
-#' @param calibration Named list controlling automatic crosstalk calibration.
-#'   Options are `grid`, `nrep`, `nsample`, and `max_features_per_view`.
-#'
-#' @param nrep Number of independent null replicates. One replicate returns a
-#'   `MultiAssayExperiment`; several return a `mimesys_mae_simulation` list.
-#' @param return_type `"mae"` (default) returns MAE output; `"simulation"`
-#'   returns a list with the pcl-style `replicates` from [sim_from_template()],
-#'   `settings`, and the fitted `template`.
-#'
-#' @return A null-data `MultiAssayExperiment` (or a `mimesys_mae_simulation`
-#'   list when `nrep > 1`). The selected crosstalk value and full calibration
-#'   result are stored in `metadata(x)$simulation`.
-#' @examples
-#' data(stelzer_mae)
-#' tmpl <- fit_template(stelzer_mae, shared.rank = 2)
-#' null_mae <- simulate_mimesys_null(
-#'     tmpl, n = 40, p = 10,
-#'     calibration = list(grid = c(0, 0.5, 1), nrep = 1)
-#' )
-#' S4Vectors::metadata(null_mae)$simulation$crosstalk
-#' @export
-simulate_mimesys_null <- function(template,
+## design = "null" of simulate_mimesys(): null feature data, no outcome
+.simulate_null_mae <- function(template,
     n,
     p = NULL,
     crosstalk = "calibrate",
@@ -351,70 +323,246 @@ simulate_mimesys_null <- function(template,
     .mimesys_collect_maes(maes, settings)
 }
 
-#' Simulate multi-omics data with a compact MAE-first interface
+
+#' Simulate multi-omics data: the main MimeSys interface
 #'
-#' This is the recommended user-facing simulation interface. It accepts a
-#' `MultiAssayExperiment` or a fitted `mimesys_template`, uses practical
-#' defaults, and returns simulated data as a `MultiAssayExperiment`. The
-#' lower-level [gen_simmba()] remains available when every simulation control
-#' must be supplied separately.
+#' One function for every MimeSys simulation. It accepts a
+#' `MultiAssayExperiment`, a list of matrices or a fitted template, fits the
+#' template if needed, calibrates crosstalk by default, and returns the
+#' simulated data as a `MultiAssayExperiment`. `design` chooses what is
+#' simulated:
+#'
+#' * `"outcome"` (default): multi-omics features with planted outcome signal
+#'   (continuous, binary or survival), split into training and test samples
+#'   (engine: [gen_simmba()]);
+#' * `"null"`: feature data only, with no outcome or signal (engine:
+#'   [sim_from_template()]);
+#' * `"multistudy"`: several studies with between-study heterogeneity, pooled
+#'   in one MAE with a `study` column (engine: [gen_multistudy()]);
+#' * `"mediation"`: an exposure, mediators in one or more views and an outcome,
+#'   with the exact natural indirect, direct and total effects, including
+#'   sequential (multi-stage) mediation (engine: [gen_mediation()]).
+#'
+#' Each design reads its own option lists (see Details); supplying a list that
+#' a design does not use is an error, so a setting is never silently ignored.
+#' The lower-level engines remain exported for full control.
 #'
 #' @param template A `MultiAssayExperiment`, a `SummarizedExperiment`, a named
-#'   list of matrices, or a fitted `mimesys_template`.
-#' @param n Number of samples per replicate.
+#'   list of matrices, or a fitted `mimesys_template`. With
+#'   `design = "multistudy"` it may also be one template (or data set) per
+#'   study: a list of templates from [fit_study_templates()] or a list of data
+#'   sets (fitted with `fit_study_templates(template, ...)`, using
+#'   `template_args`); see [gen_multistudy()].
+#' @param n Number of samples per replicate. With `design = "multistudy"`, the
+#'   samples per study: one value for every study (with `nstudy`) or one value
+#'   per study.
 #' @param p Number of features per view. See [gen_simmba()].
 #' @param crosstalk Cross-view dependence strength. The default `"calibrate"`
 #'   selects a value by matching empirical and simulated cross-view correlation
 #'   blocks. Supply a numeric value to bypass calibration; `0` removes template
-#'   shared structure and `1` uses the fitted template level.
-#' @param preset Built-in simulation setting. Use [mimesys_presets()] to list
-#'   choices. Explicit `outcome`, `signal`, and `null_model` values override
-#'   the preset.
-#' @param outcome Either one of `"linear"`, `"friedman"`, `"friedman2"`,
-#'   `"shared_latent"`, or `"interaction"`, or a named list. List options are
+#'   shared structure and `1` uses the fitted template level. With one
+#'   template per study, calibration is done for each study on its own
+#'   template and size.
+#' @param design What to simulate: `"outcome"` (default), `"null"`,
+#'   `"multistudy"` or `"mediation"`.
+#' @param preset Built-in outcome setting (designs `"outcome"` and
+#'   `"multistudy"`). Use [mimesys_presets()] to list choices. Explicit
+#'   `outcome`, `signal`, and `null_model` values override the preset.
+#' @param outcome Outcome model (designs `"outcome"` and `"multistudy"`):
+#'   either one of `"linear"`, `"friedman"`, `"friedman2"`, `"shared_latent"`,
+#'   or `"interaction"`, or a named list. List options are
 #'   `model`, `type`, `snr`, `friedman_share`, `shared_latent_function`,
 #'   `shared_latent_n_factors`, `shared_latent_weight` (share of signal from
 #'   the shared factors; the rest is view-specific), `nonlinear_weight`,
 #'   `interaction_weight`, `n_interactions`, `prevalence` (binary target case
 #'   proportion), `baseline_hazard`, `cens_rate` (survival target censoring
-#'   proportion), `cens_lower`, `cens_upper`, `cens_type` (`"uniform"`,
-#'   `"exponential"` or `"administrative"`), `cens_times` (user censoring
-#'   times), `cens_dependence` (informative censoring), `cens_accrual`,
-#'   `cens_dropout`, `baseline_shape` (Weibull shape) and `keep_true_times`.
-#'   See [gen_simmba()].
-#' @param signal Named list controlling spike-ins. Options are `prob`,
-#'   `neg_prob`, `effect_meanlog`, `effect_sdlog`, `align`, and `share`
-#'   (see `signal.prob`, `signal.neg.prob`, `effect.meanlog`, `effect.sdlog`,
-#'   `signal.align` and `signal.share` in [gen_simmba()]). By default,
-#'   `align = 1`; supply `share` to enforce a desired
-#'   relative contribution among views with nonzero spike-in signal.
-#' @param null_model Named list controlling null-data generation. Options are
-#'   `feature_select`, `feature_jitter`, `view_models`, and `back_transform`
-#'   (default `FALSE`: views fitted with a `view.transform` are returned on
-#'   the fitted, transformed scale; set `TRUE` for the original measurement
-#'   scale, see [sim_from_template()]).
-#' @param template_args Named list passed to [fit_template()] only when
-#'   `template` is not already fitted.
+#'   proportion; with `"multistudy"` one value or one per study), `cens_lower`,
+#'   `cens_upper`, `cens_type` (`"uniform"`, `"exponential"` or
+#'   `"administrative"`), `cens_times` (user censoring times), `cens_dependence`
+#'   (informative censoring), `cens_accrual`, `cens_dropout`, `baseline_shape`
+#'   (Weibull shape) and `keep_true_times`. See [gen_simmba()].
+#' @param signal Named list controlling spike-ins (designs `"outcome"` and
+#'   `"multistudy"`). Options are `prob`, `neg_prob`, `effect_meanlog`,
+#'   `effect_sdlog`, `align`, and `share` (see `signal.prob`,
+#'   `signal.neg.prob`, `effect.meanlog`, `effect.sdlog`, `signal.align` and
+#'   `signal.share` in [gen_simmba()]). By default, `align = 1`; supply `share`
+#'   to enforce a desired relative contribution among views with nonzero
+#'   spike-in signal.
+#' @param heterogeneity Named list of between-study differences (design
+#'   `"multistudy"`). Options are `effect_cor`, `support_overlap`,
+#'   `intercept_sd`, `snr_sd`, `shift_sd`, `batch_loc_sd`, `batch_scale_sd`
+#'   and `holdout_studies` (see `effect.cor`, `support.overlap`,
+#'   `intercept.sd`, `snr.sd`, `shift.sd`, `batch.loc.sd`, `batch.scale.sd`
+#'   and `holdout.studies` in [gen_multistudy()]). The defaults give
+#'   homogeneous studies.
+#' @param nstudy Number of studies (design `"multistudy"`). Defaults to
+#'   `length(n)`, or to the number of study templates.
+#' @param mediation Named list of mediation settings (design `"mediation"`):
+#'   `n_mediators`, `tie`, `de`, `dir_a`, `dir_b`, `effect_type`,
+#'   `exposure_type`, `exposure_prevalence`, `n_interactions`, `sigma`,
+#'   `outcome_type` (`"continuous"` or `"binary"`), `outcome_prevalence`,
+#'   `min_variability`, `n_mc`, and for sequential mediation `stages`,
+#'   `stage_links`, `stage_direct` and `stage_share`. See [gen_mediation()] for
+#'   their meaning and defaults.
+#' @param null_model Named list controlling null-data generation (every
+#'   design). Options are `feature_select`, `feature_jitter`, `view_models`,
+#'   and `back_transform` (default `FALSE`: views fitted with a
+#'   `view.transform` are returned on the fitted, transformed scale, which is
+#'   the scale outcomes, mediation paths and true effects are defined on; set
+#'   `TRUE` for the original measurement scale, see [sim_from_template()]).
+#' @param template_args Named list passed to [fit_template()] (or
+#'   [fit_study_templates()]) only when `template` is not already fitted.
 #' @param calibration Named list controlling automatic crosstalk calibration.
-#'   Options are `grid`, `nrep`, `nsample`, and `max_features_per_view`.
-#' @param train_fraction Fraction of samples labelled `"train"` in `colData()`.
+#'   Options are `grid`, `nrep`, `nsample`, and `max_features_per_view`. With
+#'   one template for several studies, calibration uses the average study
+#'   size.
+#' @param train_fraction Fraction of samples labelled `"train"` in `colData()`
+#'   (designs `"outcome"` and `"multistudy"`; with `"multistudy"`, within each
+#'   non-holdout study).
 #' @param nrep Number of independent replicates. One replicate returns a
 #'   `MultiAssayExperiment`; multiple replicates return a
 #'   `mimesys_mae_simulation` list with one MAE per replicate.
-#' @param seed Random seed.
-#' @param return_type `"mae"` (default) returns MAE-oriented output. Use
-#'   `"simulation"` to return the underlying [gen_simmba()] result.
+#' @param seed Random seed. The caller's random-number state is restored on
+#'   exit.
+#' @param return_type `"mae"` (default) returns MAE output. `"simulation"`
+#'   returns the underlying engine result: the [gen_simmba()],
+#'   [gen_multistudy()] or [gen_mediation()] list, or for `design = "null"` a
+#'   list with the pcl-style `replicates` from [sim_from_template()],
+#'   `settings` and the fitted `template`.
 #'
-#' @return A `MultiAssayExperiment`, a `mimesys_mae_simulation` list, or the
-#'   lower-level simulation list when `return_type = "simulation"`.
+#' @details
+#' Options used by each design (`template`, `n`, `p`, `crosstalk`,
+#' `null_model`, `template_args`, `calibration`, `nrep`, `seed` and
+#' `return_type` apply to all):
+#'
+#' | `design` | Option lists |
+#' |---|---|
+#' | `"outcome"` | `preset`, `outcome`, `signal`, `train_fraction` |
+#' | `"null"` | none |
+#' | `"multistudy"` | `preset`, `outcome`, `signal`, `heterogeneity`, `nstudy`, `train_fraction` |
+#' | `"mediation"` | `mediation` |
+#'
+#' Results are those of the engine with the same settings and seed. The
+#' selected crosstalk and the calibration result are stored in
+#' `metadata(x)$simulation`; the simulation truth (coefficients, study
+#' parameters, mediation effects) in `rowData()`, `colData()` and
+#' `metadata(x)$truth`.
+#'
+#' @return A `MultiAssayExperiment`, a `mimesys_mae_simulation` list (several
+#'   replicates), or the engine result when `return_type = "simulation"`.
 #' @examples
 #' data(stelzer_mae)
-#' tmpl <- fit_template(stelzer_mae, shared.rank = 2)
+#' tmpl <- fit_template(stelzer_mae, shared.rank = 2, seed = 1)
+#'
+#' ## Outcome (default design)
 #' sim_mae <- simulate_mimesys(tmpl, n = 60, p = 10, crosstalk = 0.5, seed = 1)
-#' sim_mae
 #' head(MultiAssayExperiment::colData(sim_mae))
+#'
+#' ## Survival outcome with administrative censoring
+#' surv_mae <- simulate_mimesys(tmpl, n = 60, p = 10, crosstalk = 0.5,
+#'     outcome = list(type = "survival", cens_rate = 0.3,
+#'         cens_type = "administrative"), seed = 1)
+#'
+#' ## Null data
+#' null_mae <- simulate_mimesys(tmpl, n = 40, p = 10, design = "null",
+#'     calibration = list(grid = c(0, 0.5, 1), nrep = 1))
+#' S4Vectors::metadata(null_mae)$simulation$crosstalk
+#'
+#' ## Several studies
+#' ms_mae <- simulate_mimesys(tmpl, n = c(40, 50, 30), p = 10, crosstalk = 1,
+#'     design = "multistudy",
+#'     heterogeneity = list(effect_cor = 0.5, shift_sd = 0.3,
+#'         holdout_studies = 3), seed = 1)
+#' table(MultiAssayExperiment::colData(ms_mae)$study,
+#'     MultiAssayExperiment::colData(ms_mae)$split)
+#'
+#' ## Mediation
+#' med_mae <- simulate_mimesys(tmpl, n = 150, p = 20, crosstalk = 1,
+#'     design = "mediation",
+#'     mediation = list(n_mediators = c(CYTOF = 2, Metabolomics = 2, Proteomics = 0),
+#'         tie = 0.5, n_mc = 2000))
+#' S4Vectors::metadata(med_mae)$truth$mediation$NIE
 #' @export
 simulate_mimesys <- function(template,
+    n,
+    p = NULL,
+    crosstalk = "calibrate",
+    design = c("outcome", "null", "multistudy", "mediation"),
+    preset = "default",
+    outcome = NULL,
+    signal = list(),
+    heterogeneity = list(),
+    nstudy = NULL,
+    mediation = list(),
+    null_model = list(),
+    template_args = list(),
+    calibration = list(),
+    train_fraction = 0.7,
+    nrep = 1,
+    seed = 1234,
+    return_type = c("mae", "simulation")) {
+    design <- match.arg(design)
+    return_type <- match.arg(return_type)
+    .check_design_arguments(design, names(match.call())[-1L], n, template)
+    switch(design,
+        outcome = .simulate_outcome_mae(template = template, n = n, p = p,
+            crosstalk = crosstalk, preset = preset, outcome = outcome,
+            signal = signal, null_model = null_model,
+            template_args = template_args, calibration = calibration,
+            train_fraction = train_fraction, nrep = nrep, seed = seed,
+            return_type = return_type),
+        null = .simulate_null_mae(template = template, n = n, p = p,
+            crosstalk = crosstalk, null_model = null_model,
+            template_args = template_args, calibration = calibration,
+            nrep = nrep, seed = seed, return_type = return_type),
+        multistudy = .simulate_multistudy_mae(template = template, n = n,
+            nstudy = nstudy, p = p, crosstalk = crosstalk, preset = preset,
+            outcome = outcome, signal = signal, heterogeneity = heterogeneity,
+            null_model = null_model, template_args = template_args,
+            calibration = calibration, train_fraction = train_fraction,
+            nrep = nrep, seed = seed, return_type = return_type),
+        mediation = .simulate_mediation_mae(template = template, n = n, p = p,
+            crosstalk = crosstalk, mediation = mediation,
+            null_model = null_model, template_args = template_args,
+            calibration = calibration, nrep = nrep, seed = seed,
+            return_type = return_type))
+}
+
+## Option lists each design reads; a supplied option that the design does not
+## use is an error rather than silently ignored.
+.design_options <- list(
+    outcome = c("preset", "outcome", "signal", "train_fraction"),
+    null = character(0),
+    multistudy = c("preset", "outcome", "signal", "heterogeneity", "nstudy",
+        "train_fraction"),
+    mediation = "mediation")
+
+.check_design_arguments <- function(design, supplied, n, template) {
+    specific <- unique(unlist(.design_options))
+    unused <- setdiff(intersect(supplied, specific), .design_options[[design]])
+    if (length(unused) > 0L) {
+        users <- vapply(unused, function(a) {
+            d <- names(.design_options)[vapply(.design_options,
+                function(o) a %in% o, logical(1))]
+            paste0("`", a, "` (design ", paste0("\"", d, "\"", collapse = " or "), ")")
+        }, character(1))
+        stop("design = \"", design, "\" does not use ", paste(users, collapse = ", "),
+            ".", call. = FALSE)
+    }
+    if (!identical(design, "multistudy")) {
+        if (is.numeric(n) && length(n) > 1L) {
+            stop("n has ", length(n), " values; use design = \"multistudy\" for ",
+                "several studies.", call. = FALSE)
+        }
+        if (inherits(template, "mimesys_template_list")) {
+            stop("A list of study templates needs design = \"multistudy\".", call. = FALSE)
+        }
+    }
+    invisible(TRUE)
+}
+
+## design = "outcome" of simulate_mimesys()
+.simulate_outcome_mae <- function(template,
     n,
     p = NULL,
     crosstalk = "calibrate",
@@ -482,7 +630,7 @@ simulate_mimesys <- function(template,
 }
 
 ## Preset, outcome and signal options of the outcome wrappers
-## (simulate_mimesys() and simulate_multistudy())
+## (designs "outcome" and "multistudy" of simulate_mimesys())
 .mimesys_outcome_signal_options <- function(preset, outcome, signal) {
     if (!is.character(preset) || length(preset) != 1L) {
         stop("preset must be a single preset name.", call. = FALSE)

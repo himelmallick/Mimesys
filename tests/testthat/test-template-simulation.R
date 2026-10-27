@@ -114,7 +114,7 @@ test_that("MAE-first defaults calibrate crosstalk and null output contains no ou
     calibration <- list(grid = c(0, 0.5, 1), nrep = 1,
         max_features_per_view = 6)
 
-    null_mae <- simulate_mimesys_null(
+    null_mae <- simulate_mimesys(design = "null",
         template, n = 50, p = 8,
         template_args = list(rank = 2, shared.rank = 1),
         calibration = calibration, seed = 106
@@ -1069,8 +1069,8 @@ test_that("seeds make fitting and MAE simulation reproducible without touching g
     a$provenance$fitted_at <- b$provenance$fitted_at <- NULL
     expect_equal(a, b)
     testthat::skip_if_not_installed("MultiAssayExperiment")
-    n1 <- simulate_mimesys_null(a, n = 20, p = 5, crosstalk = 0.5, seed = 1)
-    n2 <- simulate_mimesys_null(a, n = 20, p = 5, crosstalk = 0.5, seed = 1)
+    n1 <- simulate_mimesys(design = "null", a, n = 20, p = 5, crosstalk = 0.5, seed = 1)
+    n2 <- simulate_mimesys(design = "null", a, n = 20, p = 5, crosstalk = 0.5, seed = 1)
     expect_identical(SummarizedExperiment::assay(MultiAssayExperiment::experiments(n1)[[1]]),
         SummarizedExperiment::assay(MultiAssayExperiment::experiments(n2)[[1]]))
     s1 <- simulate_mimesys(x, n = 20, p = 5, crosstalk = 0.5, seed = 1)
@@ -1323,17 +1323,17 @@ test_that("mediation supports continuous exposure, random directions and interac
     expect_error(gen_mediation(n = 50, template = tm, dir.a = 2, n.mc = 500), "dir.a")
 })
 
-test_that("simulate_mediation returns an MAE with mediation truth", {
+test_that("simulate_mimesys(design = \"mediation\") returns an MAE with mediation truth", {
     testthat::skip_if_not_installed("MultiAssayExperiment")
     tm <- fit_template(.mk_template(84), rank = 2, shared.rank = 1, seed = 1)
-    mae <- simulate_mediation(tm, n = 80, crosstalk = 1,
+    mae <- simulate_mimesys(design = "mediation", tm, n = 80, crosstalk = 1,
         mediation = list(n_mediators = c(a = 2, b = 0), tie = 0.4, n_mc = 500))
     cd <- MultiAssayExperiment::colData(mae)
     expect_true(all(c("exposure", "Y") %in% names(cd)))
     expect_equal(S4Vectors::metadata(mae)$truth$mediation$NIE, 0.4, tolerance = 1e-8)
     rd <- SummarizedExperiment::rowData(MultiAssayExperiment::experiments(mae)[["a"]])
     expect_equal(sum(rd$mediator), 2)
-    expect_error(simulate_mediation(tm, n = 50, crosstalk = 1, mediation = list(bad = 1)),
+    expect_error(simulate_mimesys(design = "mediation", tm, n = 50, crosstalk = 1, mediation = list(bad = 1)),
         "unsupported")
 })
 
@@ -1428,17 +1428,17 @@ test_that("mediation truth covers closure effects, matched nulls and random inte
     expect_true(all(ri$replicates[[1]]$truth$mediation$interaction_pairs$coefficient != 0))
 })
 
-test_that("simulate_mediation returns data on the scale its truth refers to", {
+test_that("simulate_mimesys(design = \"mediation\") returns data on the scale its truth refers to", {
     testthat::skip_if_not_installed("MultiAssayExperiment")
     tm <- fit_template(.mk_template(92), rank = 2, shared.rank = 1, seed = 1)
-    mae <- simulate_mediation(tm, n = 60, crosstalk = 1,
+    mae <- simulate_mimesys(design = "mediation", tm, n = 60, crosstalk = 1,
         mediation = list(n_mediators = 2, tie = 0.5, n_mc = 500))
     md <- S4Vectors::metadata(mae)$simulation
     expect_equal(sum(names(md) == "crosstalk"), 1L)
     expect_identical(S4Vectors::metadata(mae)$truth$mediation$feature_scale, "fitted")
     rd <- SummarizedExperiment::rowData(MultiAssayExperiment::experiments(mae)[["a"]])
     expect_true(all(rd$scale == "fitted"))
-    expect_error(simulate_mediation(tm, n = "a", crosstalk = 1), "n must be")
+    expect_error(simulate_mimesys(design = "mediation", tm, n = "a", crosstalk = 1), "n must be")
 })
 
 test_that("MAE experiments are matched through sampleMap primary IDs", {
@@ -1469,12 +1469,12 @@ test_that("sim_from_template is reproducible and internal callers keep drawing",
     expect_identical(s1$feature_table, s2$feature_table)
     s3 <- sim_from_template(tm, n = 20, seed = 2)
     expect_false(identical(s1$feature_table, s3$feature_table))
-    nul <- simulate_mimesys_null(tm, n = 20, crosstalk = 0.5, nrep = 2)
+    nul <- simulate_mimesys(design = "null", tm, n = 20, crosstalk = 0.5, nrep = 2)
     expect_s3_class(nul, "mimesys_mae_simulation")
     x1 <- SummarizedExperiment::assay(MultiAssayExperiment::experiments(nul$replicates[[1]])[[1]])
     x2 <- SummarizedExperiment::assay(MultiAssayExperiment::experiments(nul$replicates[[2]])[[1]])
     expect_false(identical(x1, x2))
-    raw <- simulate_mimesys_null(tm, n = 20, crosstalk = 0.5, return_type = "simulation")
+    raw <- simulate_mimesys(design = "null", tm, n = 20, crosstalk = 0.5, return_type = "simulation")
     expect_length(raw$replicates, 1)
     cal <- calibrate_crosstalk(tm, crosstalk.grid = c(0, 1), nrep = 3)
     d <- cal$raw$rescaled_frobenius[cal$raw$crosstalk == 1 & !cal$raw$diagonal_block]
@@ -1492,7 +1492,7 @@ test_that("inputs are validated", {
     expect_error(gen_simmba(n = 30, template = tm, outcome.model = "interaction",
         n.interactions = 1.5, nrep = 1), "n.interactions")
     expect_error(calibrate_crosstalk(tm, p = 1, nrep = 1), "at least two features")
-    expect_message(simulate_mimesys_null(tm, n = 20, p = 1), "Skipping crosstalk calibration")
+    expect_message(simulate_mimesys(design = "null", tm, n = 20, p = 1), "Skipping crosstalk calibration")
 })
 
 test_that("two-part model is restricted to non-negative data", {
@@ -1630,10 +1630,10 @@ test_that("sequential scenarios: shares, pure chain, no links, nulls, patterns",
     expect_error(g(stage.links = list(strength = 1)), "strength")
 })
 
-test_that("simulate_mediation passes the stage options", {
+test_that("simulate_mimesys(design = \"mediation\") passes the stage options", {
     data(franzosa_mae, package = "MimeSys")
     tf <- fit_template(franzosa_mae, shared.rank = 2)
-    mae <- simulate_mediation(tf, n = 60, crosstalk = 1, mediation = list(
+    mae <- simulate_mimesys(design = "mediation", tf, n = 60, crosstalk = 1, mediation = list(
         n_mediators = c(Microbiome = 2, Metabolome = 2),
         stages = list("Microbiome", "Metabolome"), n_mc = 800, tie = 0.5))
     tr <- S4Vectors::metadata(mae)$truth$mediation

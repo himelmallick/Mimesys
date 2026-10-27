@@ -2,16 +2,20 @@
 % Please edit documentation in R/mae_simulation.R
 \name{simulate_mimesys}
 \alias{simulate_mimesys}
-\title{Simulate multi-omics data with a compact MAE-first interface}
+\title{Simulate multi-omics data: the main MimeSys interface}
 \usage{
 simulate_mimesys(
   template,
   n,
   p = NULL,
   crosstalk = "calibrate",
+  design = c("outcome", "null", "multistudy", "mediation"),
   preset = "default",
   outcome = NULL,
   signal = list(),
+  heterogeneity = list(),
+  nstudy = NULL,
+  mediation = list(),
   null_model = list(),
   template_args = list(),
   calibration = list(),
@@ -23,79 +27,181 @@ simulate_mimesys(
 }
 \arguments{
 \item{template}{A \code{MultiAssayExperiment}, a \code{SummarizedExperiment}, a named
-list of matrices, or a fitted \code{mimesys_template}.}
+list of matrices, or a fitted \code{mimesys_template}. With
+\code{design = "multistudy"} it may also be one template (or data set) per
+study: a list of templates from \code{\link[=fit_study_templates]{fit_study_templates()}} or a list of data
+sets (fitted with \code{fit_study_templates(template, ...)}, using
+\code{template_args}); see \code{\link[=gen_multistudy]{gen_multistudy()}}.}
 
-\item{n}{Number of samples per replicate.}
+\item{n}{Number of samples per replicate. With \code{design = "multistudy"}, the
+samples per study: one value for every study (with \code{nstudy}) or one value
+per study.}
 
 \item{p}{Number of features per view. See \code{\link[=gen_simmba]{gen_simmba()}}.}
 
 \item{crosstalk}{Cross-view dependence strength. The default \code{"calibrate"}
 selects a value by matching empirical and simulated cross-view correlation
 blocks. Supply a numeric value to bypass calibration; \code{0} removes template
-shared structure and \code{1} uses the fitted template level.}
+shared structure and \code{1} uses the fitted template level. With one
+template per study, calibration is done for each study on its own
+template and size.}
 
-\item{preset}{Built-in simulation setting. Use \code{\link[=mimesys_presets]{mimesys_presets()}} to list
-choices. Explicit \code{outcome}, \code{signal}, and \code{null_model} values override
-the preset.}
+\item{design}{What to simulate: \code{"outcome"} (default), \code{"null"},
+\code{"multistudy"} or \code{"mediation"}.}
 
-\item{outcome}{Either one of \code{"linear"}, \code{"friedman"}, \code{"friedman2"},
-\code{"shared_latent"}, or \code{"interaction"}, or a named list. List options are
+\item{preset}{Built-in outcome setting (designs \code{"outcome"} and
+\code{"multistudy"}). Use \code{\link[=mimesys_presets]{mimesys_presets()}} to list choices. Explicit
+\code{outcome}, \code{signal}, and \code{null_model} values override the preset.}
+
+\item{outcome}{Outcome model (designs \code{"outcome"} and \code{"multistudy"}):
+either one of \code{"linear"}, \code{"friedman"}, \code{"friedman2"}, \code{"shared_latent"},
+or \code{"interaction"}, or a named list. List options are
 \code{model}, \code{type}, \code{snr}, \code{friedman_share}, \code{shared_latent_function},
 \code{shared_latent_n_factors}, \code{shared_latent_weight} (share of signal from
 the shared factors; the rest is view-specific), \code{nonlinear_weight},
 \code{interaction_weight}, \code{n_interactions}, \code{prevalence} (binary target case
 proportion), \code{baseline_hazard}, \code{cens_rate} (survival target censoring
-proportion), \code{cens_lower}, \code{cens_upper}, \code{cens_type} (\code{"uniform"},
-\code{"exponential"} or \code{"administrative"}), \code{cens_times} (user censoring
-times), \code{cens_dependence} (informative censoring), \code{cens_accrual},
-\code{cens_dropout}, \code{baseline_shape} (Weibull shape) and \code{keep_true_times}.
-See \code{\link[=gen_simmba]{gen_simmba()}}.}
+proportion; with \code{"multistudy"} one value or one per study), \code{cens_lower},
+\code{cens_upper}, \code{cens_type} (\code{"uniform"}, \code{"exponential"} or
+\code{"administrative"}), \code{cens_times} (user censoring times), \code{cens_dependence}
+(informative censoring), \code{cens_accrual}, \code{cens_dropout}, \code{baseline_shape}
+(Weibull shape) and \code{keep_true_times}. See \code{\link[=gen_simmba]{gen_simmba()}}.}
 
-\item{signal}{Named list controlling spike-ins. Options are \code{prob},
-\code{neg_prob}, \code{effect_meanlog}, \code{effect_sdlog}, \code{align}, and \code{share}
-(see \code{signal.prob}, \code{signal.neg.prob}, \code{effect.meanlog}, \code{effect.sdlog},
-\code{signal.align} and \code{signal.share} in \code{\link[=gen_simmba]{gen_simmba()}}). By default,
-\code{align = 1}; supply \code{share} to enforce a desired
-relative contribution among views with nonzero spike-in signal.}
+\item{signal}{Named list controlling spike-ins (designs \code{"outcome"} and
+\code{"multistudy"}). Options are \code{prob}, \code{neg_prob}, \code{effect_meanlog},
+\code{effect_sdlog}, \code{align}, and \code{share} (see \code{signal.prob},
+\code{signal.neg.prob}, \code{effect.meanlog}, \code{effect.sdlog}, \code{signal.align} and
+\code{signal.share} in \code{\link[=gen_simmba]{gen_simmba()}}). By default, \code{align = 1}; supply \code{share}
+to enforce a desired relative contribution among views with nonzero
+spike-in signal.}
 
-\item{null_model}{Named list controlling null-data generation. Options are
-\code{feature_select}, \code{feature_jitter}, \code{view_models}, and \code{back_transform}
-(default \code{FALSE}: views fitted with a \code{view.transform} are returned on
-the fitted, transformed scale; set \code{TRUE} for the original measurement
-scale, see \code{\link[=sim_from_template]{sim_from_template()}}).}
+\item{heterogeneity}{Named list of between-study differences (design
+\code{"multistudy"}). Options are \code{effect_cor}, \code{support_overlap},
+\code{intercept_sd}, \code{snr_sd}, \code{shift_sd}, \code{batch_loc_sd}, \code{batch_scale_sd}
+and \code{holdout_studies} (see \code{effect.cor}, \code{support.overlap},
+\code{intercept.sd}, \code{snr.sd}, \code{shift.sd}, \code{batch.loc.sd}, \code{batch.scale.sd}
+and \code{holdout.studies} in \code{\link[=gen_multistudy]{gen_multistudy()}}). The defaults give
+homogeneous studies.}
 
-\item{template_args}{Named list passed to \code{\link[=fit_template]{fit_template()}} only when
-\code{template} is not already fitted.}
+\item{nstudy}{Number of studies (design \code{"multistudy"}). Defaults to
+\code{length(n)}, or to the number of study templates.}
+
+\item{mediation}{Named list of mediation settings (design \code{"mediation"}):
+\code{n_mediators}, \code{tie}, \code{de}, \code{dir_a}, \code{dir_b}, \code{effect_type},
+\code{exposure_type}, \code{exposure_prevalence}, \code{n_interactions}, \code{sigma},
+\code{outcome_type} (\code{"continuous"} or \code{"binary"}), \code{outcome_prevalence},
+\code{min_variability}, \code{n_mc}, and for sequential mediation \code{stages},
+\code{stage_links}, \code{stage_direct} and \code{stage_share}. See \code{\link[=gen_mediation]{gen_mediation()}} for
+their meaning and defaults.}
+
+\item{null_model}{Named list controlling null-data generation (every
+design). Options are \code{feature_select}, \code{feature_jitter}, \code{view_models},
+and \code{back_transform} (default \code{FALSE}: views fitted with a
+\code{view.transform} are returned on the fitted, transformed scale, which is
+the scale outcomes, mediation paths and true effects are defined on; set
+\code{TRUE} for the original measurement scale, see \code{\link[=sim_from_template]{sim_from_template()}}).}
+
+\item{template_args}{Named list passed to \code{\link[=fit_template]{fit_template()}} (or
+\code{\link[=fit_study_templates]{fit_study_templates()}}) only when \code{template} is not already fitted.}
 
 \item{calibration}{Named list controlling automatic crosstalk calibration.
-Options are \code{grid}, \code{nrep}, \code{nsample}, and \code{max_features_per_view}.}
+Options are \code{grid}, \code{nrep}, \code{nsample}, and \code{max_features_per_view}. With
+one template for several studies, calibration uses the average study
+size.}
 
-\item{train_fraction}{Fraction of samples labelled \code{"train"} in \code{colData()}.}
+\item{train_fraction}{Fraction of samples labelled \code{"train"} in \code{colData()}
+(designs \code{"outcome"} and \code{"multistudy"}; with \code{"multistudy"}, within each
+non-holdout study).}
 
 \item{nrep}{Number of independent replicates. One replicate returns a
 \code{MultiAssayExperiment}; multiple replicates return a
 \code{mimesys_mae_simulation} list with one MAE per replicate.}
 
-\item{seed}{Random seed.}
+\item{seed}{Random seed. The caller's random-number state is restored on
+exit.}
 
-\item{return_type}{\code{"mae"} (default) returns MAE-oriented output. Use
-\code{"simulation"} to return the underlying \code{\link[=gen_simmba]{gen_simmba()}} result.}
+\item{return_type}{\code{"mae"} (default) returns MAE output. \code{"simulation"}
+returns the underlying engine result: the \code{\link[=gen_simmba]{gen_simmba()}},
+\code{\link[=gen_multistudy]{gen_multistudy()}} or \code{\link[=gen_mediation]{gen_mediation()}} list, or for \code{design = "null"} a
+list with the pcl-style \code{replicates} from \code{\link[=sim_from_template]{sim_from_template()}},
+\code{settings} and the fitted \code{template}.}
 }
 \value{
-A \code{MultiAssayExperiment}, a \code{mimesys_mae_simulation} list, or the
-lower-level simulation list when \code{return_type = "simulation"}.
+A \code{MultiAssayExperiment}, a \code{mimesys_mae_simulation} list (several
+replicates), or the engine result when \code{return_type = "simulation"}.
 }
 \description{
-This is the recommended user-facing simulation interface. It accepts a
-\code{MultiAssayExperiment} or a fitted \code{mimesys_template}, uses practical
-defaults, and returns simulated data as a \code{MultiAssayExperiment}. The
-lower-level \code{\link[=gen_simmba]{gen_simmba()}} remains available when every simulation control
-must be supplied separately.
+One function for every MimeSys simulation. It accepts a
+\code{MultiAssayExperiment}, a list of matrices or a fitted template, fits the
+template if needed, calibrates crosstalk by default, and returns the
+simulated data as a \code{MultiAssayExperiment}. \code{design} chooses what is
+simulated:
+}
+\details{
+\itemize{
+\item \code{"outcome"} (default): multi-omics features with planted outcome signal
+(continuous, binary or survival), split into training and test samples
+(engine: \code{\link[=gen_simmba]{gen_simmba()}});
+\item \code{"null"}: feature data only, with no outcome or signal (engine:
+\code{\link[=sim_from_template]{sim_from_template()}});
+\item \code{"multistudy"}: several studies with between-study heterogeneity, pooled
+in one MAE with a \code{study} column (engine: \code{\link[=gen_multistudy]{gen_multistudy()}});
+\item \code{"mediation"}: an exposure, mediators in one or more views and an outcome,
+with the exact natural indirect, direct and total effects, including
+sequential (multi-stage) mediation (engine: \code{\link[=gen_mediation]{gen_mediation()}}).
+}
+
+Each design reads its own option lists (see Details); supplying a list that
+a design does not use is an error, so a setting is never silently ignored.
+The lower-level engines remain exported for full control.
+
+Options used by each design (\code{template}, \code{n}, \code{p}, \code{crosstalk},
+\code{null_model}, \code{template_args}, \code{calibration}, \code{nrep}, \code{seed} and
+\code{return_type} apply to all):\tabular{ll}{
+   \code{design} \tab Option lists \cr
+   \code{"outcome"} \tab \code{preset}, \code{outcome}, \code{signal}, \code{train_fraction} \cr
+   \code{"null"} \tab none \cr
+   \code{"multistudy"} \tab \code{preset}, \code{outcome}, \code{signal}, \code{heterogeneity}, \code{nstudy}, \code{train_fraction} \cr
+   \code{"mediation"} \tab \code{mediation} \cr
+}
+
+
+Results are those of the engine with the same settings and seed. The
+selected crosstalk and the calibration result are stored in
+\code{metadata(x)$simulation}; the simulation truth (coefficients, study
+parameters, mediation effects) in \code{rowData()}, \code{colData()} and
+\code{metadata(x)$truth}.
 }
 \examples{
 data(stelzer_mae)
-tmpl <- fit_template(stelzer_mae, shared.rank = 2)
+tmpl <- fit_template(stelzer_mae, shared.rank = 2, seed = 1)
+
+## Outcome (default design)
 sim_mae <- simulate_mimesys(tmpl, n = 60, p = 10, crosstalk = 0.5, seed = 1)
-sim_mae
 head(MultiAssayExperiment::colData(sim_mae))
+
+## Survival outcome with administrative censoring
+surv_mae <- simulate_mimesys(tmpl, n = 60, p = 10, crosstalk = 0.5,
+    outcome = list(type = "survival", cens_rate = 0.3,
+        cens_type = "administrative"), seed = 1)
+
+## Null data
+null_mae <- simulate_mimesys(tmpl, n = 40, p = 10, design = "null",
+    calibration = list(grid = c(0, 0.5, 1), nrep = 1))
+S4Vectors::metadata(null_mae)$simulation$crosstalk
+
+## Several studies
+ms_mae <- simulate_mimesys(tmpl, n = c(40, 50, 30), p = 10, crosstalk = 1,
+    design = "multistudy",
+    heterogeneity = list(effect_cor = 0.5, shift_sd = 0.3,
+        holdout_studies = 3), seed = 1)
+table(MultiAssayExperiment::colData(ms_mae)$study,
+    MultiAssayExperiment::colData(ms_mae)$split)
+
+## Mediation
+med_mae <- simulate_mimesys(tmpl, n = 150, p = 20, crosstalk = 1,
+    design = "mediation",
+    mediation = list(n_mediators = c(CYTOF = 2, Metabolomics = 2, Proteomics = 0),
+        tie = 0.5, n_mc = 2000))
+S4Vectors::metadata(med_mae)$truth$mediation$NIE
 }

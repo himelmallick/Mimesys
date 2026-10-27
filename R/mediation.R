@@ -827,46 +827,8 @@ gen_mediation <- function(n,
     sweep(sweep(x, 2, std$mean, "-"), 2, std$sd, "/")
 }
 
-#' Simulate multi-view mediation data as a MultiAssayExperiment
-#'
-#' MAE-first interface to [gen_mediation()]. Fits or accepts a template,
-#' calibrates crosstalk by default, and returns simulated mediation data with
-#' the exposure and outcome in `colData()`, mediator truth in each
-#' experiment's `rowData()`, and the true natural indirect, direct and total
-#' effects in `metadata(x)$truth$mediation`.
-#'
-#' @inheritParams simulate_mimesys
-#' @param mediation Named list of mediation settings: `n_mediators`, `tie`,
-#'   `de`, `dir_a`, `dir_b`, `effect_type`, `exposure_type`,
-#'   `exposure_prevalence`, `n_interactions`, `sigma`, `outcome_type`
-#'   (`"continuous"` or `"binary"`), `outcome_prevalence`, `min_variability`,
-#'   `n_mc`, and for sequential mediation `stages`, `stage_links`,
-#'   `stage_direct` and `stage_share`. See [gen_mediation()] for their meaning
-#'   and defaults.
-#' @param null_model Named list: `feature_select`, `feature_jitter`,
-#'   `view_models` and `back_transform`. The default `back_transform = FALSE`
-#'   returns every view on the fitted (transformed) scale, which is the scale
-#'   the outcome, paths and true effects are defined on. With `TRUE`, features
-#'   are returned on the original measurement scale but the truth still refers
-#'   to the fitted scale (for example, analyse `log1p` of a `log1p`-fitted
-#'   view).
-#' @param return_type `"mae"` (default) or `"simulation"` for the
-#'   [gen_mediation()] result.
-#'
-#' @return A `MultiAssayExperiment` (one replicate), a `mimesys_mae_simulation`
-#'   collection (`nrep > 1`), or the [gen_mediation()] list.
-#' @examples
-#' data(stelzer_mae)
-#' tmpl <- fit_template(stelzer_mae, shared.rank = 2, seed = 1)
-#' mae <- simulate_mediation(
-#'     tmpl, n = 150, p = 20, crosstalk = 1,
-#'     mediation = list(n_mediators = c(CYTOF = 2, Metabolomics = 2, Proteomics = 0),
-#'         tie = 0.5, n_mc = 2000)
-#' )
-#' head(MultiAssayExperiment::colData(mae)[, c("exposure", "Y")])
-#' S4Vectors::metadata(mae)$truth$mediation$NIE
-#' @export
-simulate_mediation <- function(template,
+## design = "mediation" of simulate_mimesys(): MAE interface to gen_mediation()
+.simulate_mediation_mae <- function(template,
     n,
     p = NULL,
     crosstalk = "calibrate",

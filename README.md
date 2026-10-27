@@ -42,7 +42,9 @@ template <- fit_template(
   view.transform = c(Metabolomics = "log1p", Proteomics = "log1p")
 )
 
-# 2. Simulate an outcome study. Crosstalk is calibrated to the template by
+# 2. simulate_mimesys() runs every simulation; `design` chooses what:
+#    "outcome" (default), "null", "multistudy" or "mediation".
+#    Simulate an outcome study. Crosstalk is calibrated to the template by
 #    default; views are returned on the fitted (here log1p) scale.
 sim_mae <- simulate_mimesys(
   template,
@@ -56,11 +58,11 @@ rowData(experiments(sim_mae)[["Proteomics"]])   # per-feature truth (beta, ...)
 metadata(sim_mae)$simulation           # settings, calibration, provenance
 
 # 3. Null data only (no outcome)
-null_mae <- simulate_mimesys_null(template, n = 200, p = 200)
+null_mae <- simulate_mimesys(template, design = "null", n = 200, p = 200)
 
 # 4. Mediation (see "Mediation" below)
-med_mae <- simulate_mediation(
-  template, n = 300,
+med_mae <- simulate_mimesys(
+  template, design = "mediation", n = 300,
   mediation = list(n_mediators = c(CYTOF = 3, Metabolomics = 3, Proteomics = 0),
                    tie = 1, de = 0.5)
 )
@@ -68,8 +70,8 @@ metadata(med_mae)$truth$mediation[c("NIE", "NDE", "TE")]
 
 # 5. Several studies with between-study heterogeneity (see "Multi-study
 #    simulation" below); study 3 is held out for testing
-ms_mae <- simulate_multistudy(
-  template, n = c(150, 200, 100), p = 30,
+ms_mae <- simulate_mimesys(
+  template, design = "multistudy", n = c(150, 200, 100), p = 30,
   heterogeneity = list(effect_cor = 0.5, support_overlap = 0.7,
                        shift_sd = 0.3, batch_loc_sd = 0.3,
                        holdout_studies = 3)
@@ -96,7 +98,7 @@ current stream.
 | `calibrate_crosstalk()` | Chooses crosstalk so simulated cross-view correlations match the template |
 | `validate_template()` | Calibration plus correlation and marginal diagnostics |
 | `crosstalk_max()` | Largest valid crosstalk per view |
-| `simulate_mimesys()`, `simulate_mimesys_null()`, `simulate_multistudy()`, `simulate_mediation()` | MAE-first wrappers: fit if needed, calibrate crosstalk, simulate, return `MultiAssayExperiment` objects |
+| `simulate_mimesys()` | **Main interface.** Fits if needed, calibrates crosstalk, simulates and returns `MultiAssayExperiment` objects; `design = "outcome"` (default), `"null"`, `"multistudy"` or `"mediation"` |
 | `mimesys_presets()` | Outcome presets for `simulate_mimesys()` |
 | `as_mimesys_mae()`, `simulation_view_matrices()`, `as_mimesys_view_list()` | Conversions between simulation results, MAEs and lists of matrices |
 | `blockwise_feature_correlation()`, `feature_correlation_frobenius()`, `compare_feature_correlation_structure()`, `summarize_simulation()`, `plot_*()` | Diagnostics and plots |
@@ -227,17 +229,27 @@ plus:
 | `stage.direct` | `1` | Per stage: multiplier on the direct exposure paths (0: reached only through the previous stage). |
 | `stage.share` | `NULL` | Per stage: share of the indirect effect carried by that stage's mediators. |
 
-### MAE wrappers
+### `simulate_mimesys()`
 
-`simulate_mimesys(template, n, p, crosstalk = "calibrate", preset = "default",
-outcome, signal, null_model, template_args, calibration, train_fraction = 0.7,
-nrep = 1, seed = 1234, return_type = c("mae", "simulation"))`.
-`simulate_mimesys_null()` takes the same arguments without `preset`, `outcome`,
-`signal` and `train_fraction`; `simulate_mediation()` replaces them with
-`mediation`. `simulate_multistudy()` takes the `simulate_mimesys()` arguments
-plus `nstudy` and `heterogeneity`; `n` is the size of each study, and
-`template` may hold one template (or data set) per study, in which case
-crosstalk is calibrated for each study separately. The option lists use `snake_case` and map to the arguments above:
+`simulate_mimesys(template, n, p, crosstalk = "calibrate", design = "outcome",
+preset = "default", outcome, signal, heterogeneity, nstudy, mediation,
+null_model, template_args, calibration, train_fraction = 0.7, nrep = 1,
+seed = 1234, return_type = c("mae", "simulation"))`.
+
+| `design` | Simulates | Engine | Option lists it reads |
+|---|---|---|---|
+| `"outcome"` (default) | features with planted outcome signal, train/test split | `gen_simmba()` | `preset`, `outcome`, `signal`, `train_fraction` |
+| `"null"` | features only | `sim_from_template()` | none |
+| `"multistudy"` | several studies with heterogeneity, pooled in one MAE | `gen_multistudy()` | `preset`, `outcome`, `signal`, `heterogeneity`, `nstudy`, `train_fraction` |
+| `"mediation"` | exposure, mediators, outcome and exact effects | `gen_mediation()` | `mediation` |
+
+`template`, `n`, `p`, `crosstalk`, `null_model`, `template_args`,
+`calibration`, `nrep`, `seed` and `return_type` apply to every design. An
+option list that the chosen design does not use is an error. With
+`"multistudy"`, `n` is the size of each study, and `template` may hold one
+template (or data set) per study, in which case crosstalk is calibrated for
+each study separately. The option lists use `snake_case` and map to the
+arguments above:
 
 | List | Options (default) | Maps to |
 |---|---|---|
@@ -407,7 +419,7 @@ with the study (`Study_1_Subject1`).
 
 ## Mediation
 
-`gen_mediation()` / `simulate_mediation()` simulate an exposure $T$ (binary
+`gen_mediation()` / `simulate_mimesys(design = "mediation")` simulate an exposure $T$ (binary
 or continuous; $T^\ast$ is its standardized version), mediators $M_j$ in any
 views, and an outcome. The exposure acts on each mediator's latent normal score
 $Z_j$, so mediators keep their template distributions ($Q_j$ is the feature's
@@ -447,7 +459,7 @@ $T \to M_1 \to M_2 \to Y$ and $T \to M_2 \to Y$), which add up to the NIE.
 ```r
 data(franzosa_mae)
 micro_template <- fit_template(franzosa_mae, view.transform = c(Metabolome = "log1p"))
-seq_mae <- simulate_mediation(micro_template, n = 500, mediation = list(
+seq_mae <- simulate_mimesys(micro_template, design = "mediation", n = 500, mediation = list(
   n_mediators = c(Microbiome = 5, Metabolome = 5),
   stages = list(Microbe = "Microbiome", Metabolite = "Metabolome"),
   stage_links = list(type = "random", density = 0.3, strength = 0.3),

@@ -23,7 +23,7 @@ identical views and features.
 \description{
 Fits a \code{\link[=fit_template]{fit_template()}} template to each study's data, restricted to the
 views and features that every study has, so the templates can be used
-together in \code{\link[=gen_multistudy]{gen_multistudy()}} and \code{\link[=simulate_multistudy]{simulate_multistudy()}} (one template
+together in \code{\link[=gen_multistudy]{gen_multistudy()}} and \code{simulate_mimesys(design = "multistudy")} (one template
 per study). Features that a fit drops in any study (all missing, or
 constant) are removed from every study and the templates are refitted, so
 all templates end up with the same features in the same order.

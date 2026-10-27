@@ -171,11 +171,19 @@ warning.
 
 # Simulating data
 
+`simulate_mimesys()` runs every simulation. Its `design` argument chooses what
+is simulated: `"outcome"` (the default: features with planted outcome signal),
+`"null"` (features only), `"multistudy"` (several heterogeneous studies) or
+`"mediation"` (exposure, mediators and outcome with exact causal effects).
+Each design reads its own option lists, and an option a design does not use
+is an error.
+
 ## Null data
 
 ```{r null}
-null_mae <- simulate_mimesys_null(
+null_mae <- simulate_mimesys(
     template,
+    design = "null",
     n = 100,
     p = 30,
     crosstalk = cal$best_crosstalk
@@ -194,8 +202,8 @@ measurement scale:
 metab_rows <- rowData(experiments(null_mae)[["Metabolomics"]])
 head(metab_rows[, c("scale", "transform")])
 summary(as.vector(assay(experiments(null_mae)[["Metabolomics"]])))
-orig_mae <- simulate_mimesys_null(
-    template, n = 100, p = 30, crosstalk = cal$best_crosstalk,
+orig_mae <- simulate_mimesys(
+    template, design = "null", n = 100, p = 30, crosstalk = cal$best_crosstalk,
     null_model = list(back_transform = TRUE)
 )
 summary(as.vector(assay(experiments(orig_mae)[["Metabolomics"]])))
@@ -232,6 +240,53 @@ head(rd[rd$outcome_feature, c("template_feature", "beta")])
 For binary and survival outcomes `snr` is the signal-to-noise ratio on the
 latent scale, `prevalence` sets the case proportion and `cens_rate` the
 censoring proportion. `signal$share` balances the signal across views.
+
+Survival outcomes can also have a Weibull baseline hazard (`baseline_shape`)
+and different censoring mechanisms: `cens_type = "exponential"` (constant
+loss to follow-up), `"administrative"` (staggered entry and a fixed study
+end, with optional `cens_dropout`), user times (`cens_times`) or informative
+censoring (`cens_dependence`):
+
+```{r survival}
+surv_mae <- simulate_mimesys(
+    template,
+    n = 200,
+    p = 30,
+    crosstalk = cal$best_crosstalk,
+    outcome = list(type = "survival", cens_rate = 0.4,
+        cens_type = "administrative", cens_dropout = 0.1,
+        keep_true_times = TRUE),
+    seed = 1
+)
+head(colData(surv_mae)[, c("time", "status", "event_time", "cens_time")])
+mean(surv_mae$status == 0)
+```
+
+## Several studies
+
+`design = "multistudy"` simulates several studies with the same features and
+between-study heterogeneity: case-mix shifts, technical batch effects,
+study-specific effect sizes and signal features, intercepts and
+signal-to-noise ratios. `n` gives the size of each study, and
+`holdout_studies` sends whole studies to the test set:
+
+```{r multistudy}
+ms_mae <- simulate_mimesys(
+    template,
+    design = "multistudy",
+    n = c(80, 100, 60),
+    p = 30,
+    crosstalk = cal$best_crosstalk,
+    heterogeneity = list(effect_cor = 0.5, support_overlap = 0.7,
+        shift_sd = 0.3, batch_loc_sd = 0.2, holdout_studies = 3),
+    seed = 1
+)
+table(ms_mae$study, ms_mae$split)
+```
+
+`template` can also be one template per study, fitted on real cohorts with
+`fit_study_templates()`, so each study has its own marginals and correlation
+structure.
 
 # Outcome scenarios
 
@@ -301,8 +356,9 @@ micro_template <- fit_template(
     view.transform = c(Metabolome = "log1p"),
     seed = 1
 )
-micro_mae <- simulate_mimesys_null(
+micro_mae <- simulate_mimesys(
     micro_template,
+    design = "null",
     n = 300,
     crosstalk = 1,
     null_model = list(view_models = c(Microbiome = "two_part_copula"))
@@ -317,7 +373,7 @@ c(
 
 # Mediation
 
-`gen_mediation()` and `simulate_mediation()` simulate an exposure, mediators
+`gen_mediation()` and `simulate_mimesys(design = "mediation")` simulate an exposure, mediators
 in one or more views, and an outcome, for benchmarking (multi-view) mediation
 methods. Any view and any feature can be a mediator.
 
@@ -376,9 +432,23 @@ fit_y <- lm(r$sample_metadata$Y ~ exposure + mediators)
 c(NIE_hat = sum(a_hat * coef(fit_y)[-(1:2)]), DE_hat = unname(coef(fit_y)[2]))
 ```
 
-`simulate_mediation()` returns the same simulation as a
+`simulate_mimesys(design = "mediation")` returns the same simulation as a
 `MultiAssayExperiment`, with `exposure` and `Y` in `colData()`, the mediator
-truth in `rowData()` and the effects in `metadata(x)$truth$mediation`.
+truth in `rowData()` and the effects in `metadata(x)$truth$mediation`:
+
+```{r mediation-mae}
+med_mae <- simulate_mimesys(
+    template,
+    design = "mediation",
+    n = 500,
+    p = 30,
+    crosstalk = cal$best_crosstalk,
+    mediation = list(n_mediators = c(CYTOF = 3, Metabolomics = 3, Proteomics = 0),
+        tie = 1, de = 0.5, n_mc = 2000),
+    seed = 1
+)
+unlist(metadata(med_mae)$truth$mediation[c("NIE", "NDE", "TE")])
+```
 
 ## Sequential mediation
 
